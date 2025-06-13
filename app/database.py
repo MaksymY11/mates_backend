@@ -1,13 +1,17 @@
-from sqlalchemy import create_engine
+from sqlalchemy import MetaData, create_engine
+from databases import Database
 import os
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Detect if using SQLite (for local dev)
-if DATABASE_URL.startswith("sqlite"):
-    engine = create_engine(
-        DATABASE_URL,
-        connect_args={"check_same_thread": False}
-    )
-else:
-    engine = create_engine(DATABASE_URL)
+# Conditional connect args for SQLite
+connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+
+# Create the engine
+engine = create_engine(DATABASE_URL, connect_args=connect_args)
+
+# Create metadata instance
+metadata = MetaData()
+
+# Create async database instance for use in startup/shutdown
+database = Database(DATABASE_URL)
