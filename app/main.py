@@ -2,8 +2,6 @@ from fastapi import FastAPI
 from .database import database, metadata, engine
 from .routes import users
 
-metadata.create_all(engine)
-
 app = FastAPI()
 
 @app.on_event("startup")
