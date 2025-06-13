@@ -3,6 +3,8 @@ from databases import Database
 import os
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+if DATABASE_URL is None:
+    raise RuntimeError("DATABASE_URL is not set. Please define it in your environment.")
 
 # Conditional connect args for SQLite
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
