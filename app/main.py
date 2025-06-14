@@ -1,7 +1,9 @@
+import os
 from fastapi import FastAPI
 from databases import Database
 
 app = FastAPI()
+DATABASE_URL = os.getenv("DATABASE_URL")
 database = Database(DATABASE_URL)  # however you pull in your URL
 
 @app.on_event("startup")
