@@ -5,7 +5,7 @@ from alembic import context
 import os
 
 # Load metadata from your models
-from app.database import metadata
+from app.models import metadata
 
 # Alembic Config
 config = context.config
