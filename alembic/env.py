@@ -8,12 +8,10 @@ import os
 from app.models import metadata
 
 # Alembic Config
+DATABASE_URL = os.getenv("DATABASE_URL")    # Use DATABASE_URL from environment
 config = context.config
+config.set_main_option("sqlalchemy.url", "DATABASE_URL")
 fileConfig(config.config_file_name)
-
-# Use DATABASE_URL from environment
-DATABASE_URL = os.getenv("DATABASE_URL")
-config.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL"))
 
 target_metadata = metadata
 
