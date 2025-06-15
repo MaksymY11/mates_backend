@@ -1,16 +1,27 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import Depends, APIRouter, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
 from app.database import database
 from app.models import users
 from passlib.context import CryptContext
 from jose import jwt
 import os
+from pydantic import BaseModel
+
+class UserRegister(BaseModel):
+    email: str
+    password: str
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 JWT_SECRET = os.getenv("JWT_SECRET", "supersecretkey")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="loginUser")
 
 @router.post("/registerUser")
-async def register_user(user: dict):
+async def register_user(user: UserRegister):
     # user = {"email": ..., "password": ...}
     hashed_password = pwd_context.hash(user["password"])
     query = users.insert().values(email=user["email"], password=hashed_password)
@@ -21,7 +32,7 @@ async def register_user(user: dict):
         raise HTTPException(status_code=400, detail="User already exists")
 
 @router.post("/loginUser")
-async def login_user(user: dict):
+async def login_user(user: UserLogin):
     query = users.select().where(users.c.email == user["email"])
     db_user = await database.fetch_one(query)
     if not db_user or not pwd_context.verify(user["password"], db_user["password"]):
@@ -31,7 +42,7 @@ async def login_user(user: dict):
     return {"access_token": token, "token_type": "bearer"}
 
 @router.get("/me")
-async def get_me(token: str):
+async def get_me(token: str = Depends(oauth2_scheme)):
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
         return {"email": payload["email"]}
