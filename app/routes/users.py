@@ -22,9 +22,9 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="loginUser")
 
 @router.post("/registerUser")
 async def register_user(user: UserRegister):
-    # user = {"email": ..., "password": ...}
-    hashed_password = pwd_context.hash(user["password"])
-    query = users.insert().values(email=user["email"], password=hashed_password)
+    # user.email and user.password (dot notation)
+    hashed_password = pwd_context.hash(user.password)
+    query = users.insert().values(email=user.email, password=hashed_password)
     try:
         await database.execute(query)
         return {"msg": "User created"}
@@ -33,9 +33,9 @@ async def register_user(user: UserRegister):
 
 @router.post("/loginUser")
 async def login_user(user: UserLogin):
-    query = users.select().where(users.c.email == user["email"])
+    query = users.select().where(users.c.email == user.email)
     db_user = await database.fetch_one(query)
-    if not db_user or not pwd_context.verify(user["password"], db_user["password"]):
+    if not db_user or not pwd_context.verify(user.password, db_user["password"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     # Generate a JWT token
     token = jwt.encode({"email": db_user["email"]}, JWT_SECRET, algorithm="HS256")
