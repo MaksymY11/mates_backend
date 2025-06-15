@@ -3,14 +3,19 @@ from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 import os
+import re
 
 # Load metadata from your models
 from app.models import metadata
 
 # Alembic Config
 DATABASE_URL = os.getenv("DATABASE_URL")    # Use DATABASE_URL from environment
+if DATABASE_URL.startswith("postgresql+asyncpg://"):
+    alembic_url = re.sub(r'^postgresql\+asyncpg://', 'postgresql://', DATABASE_URL)
+else:
+    alembic_url = DATABASE_URL
 config = context.config
-config.set_main_option("sqlalchemy.url", "DATABASE_URL")
+config.set_main_option("sqlalchemy.url", alembic_url)
 fileConfig(config.config_file_name)
 
 target_metadata = metadata
