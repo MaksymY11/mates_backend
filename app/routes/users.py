@@ -1,39 +1,39 @@
-from fastapi import APIRouter, HTTPException, Depends
-from fastapi.security import APIKeyHeader
-
-from .. import schemas, crud
-from ..security import verify_password
-from ..auth import create_access_token, verify_access_token
+from fastapi import APIRouter, HTTPException
+from app.database import database
+from app.models import users
+from passlib.context import CryptContext
+from jose import jwt
+import os
 
 router = APIRouter()
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+JWT_SECRET = os.getenv("JWT_SECRET", "supersecretkey")
 
-# Simplified token injection for Swagger UI
-oauth2_scheme = APIKeyHeader(name="Authorization")
-
-@router.post("/registerUser", response_model=schemas.UserOut)
-async def register_user(user: schemas.UserIn):
-    existing_user = await crud.get_user_by_email(user.email)
-    if existing_user:
+@router.post("/registerUser")
+async def register_user(user: dict):
+    # user = {"email": ..., "password": ...}
+    hashed_password = pwd_context.hash(user["password"])
+    query = users.insert().values(email=user["email"], password=hashed_password)
+    try:
+        await database.execute(query)
+        return {"msg": "User created"}
+    except Exception:
         raise HTTPException(status_code=400, detail="User already exists")
 
-    await crud.create_user(user)
-    return {"message": "User registered successfully"}
-
-@router.post("/loginUser", response_model=schemas.Token)
-async def login_user(user: schemas.UserIn):
-    existing_user = await crud.get_user_by_email(user.email)
-    if not existing_user or not verify_password(user.password, existing_user["password"]):
+@router.post("/loginUser")
+async def login_user(user: dict):
+    query = users.select().where(users.c.email == user["email"])
+    db_user = await database.fetch_one(query)
+    if not db_user or not pwd_context.verify(user["password"], db_user["password"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    # Generate a JWT token
+    token = jwt.encode({"email": db_user["email"]}, JWT_SECRET, algorithm="HS256")
+    return {"access_token": token, "token_type": "bearer"}
 
-    access_token = create_access_token({"sub": user.email})
-    return {"access_token": access_token, "token_type": "bearer"}
-
-@router.get("/protected")
-async def protected_route(token: str = Depends(oauth2_scheme)):
-    # Remove Bearer prefix if present
-    token_value = token.split(" ")[1] if token.startswith("Bearer ") else token
-
-    payload = verify_access_token(token_value)
-    if not payload:
+@router.get("/me")
+async def get_me(token: str):
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        return {"email": payload["email"]}
+    except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
-    return {"message": f"Welcome, {payload['sub']}!"}
