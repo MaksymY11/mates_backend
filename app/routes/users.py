@@ -1,5 +1,5 @@
-from fastapi import Depends, APIRouter, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import Depends, APIRouter, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.database import database
 from app.models import users
 from passlib.context import CryptContext
@@ -18,7 +18,7 @@ class UserLogin(BaseModel):
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 JWT_SECRET = os.getenv("JWT_SECRET", "supersecretkey")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="loginUser")
+bearer_scheme = HTTPBearer()
 
 @router.post("/registerUser")
 async def register_user(user: UserRegister):
@@ -42,7 +42,8 @@ async def login_user(user: UserLogin):
     return {"access_token": token, "token_type": "bearer"}
 
 @router.get("/me")
-async def get_me(token: str = Depends(oauth2_scheme)):
+async def get_me(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
+    token = credentials.credentials
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
         return {"email": payload["email"]}
