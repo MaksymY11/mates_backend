@@ -49,3 +49,8 @@ async def get_me(credentials: HTTPAuthorizationCredentials = Depends(bearer_sche
         return {"email": payload["email"]}
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
+    
+@router.get("/debug/users")
+async def debug_list_users():
+    rows = await database.fetch_all("SELECT id, email, password FROM users;")
+    return [dict(row) for row in rows]
