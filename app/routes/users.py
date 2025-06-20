@@ -6,6 +6,7 @@ from passlib.context import CryptContext
 from jose import jwt
 from app.auth import SECRET_KEY
 from pydantic import BaseModel
+import os
 
 # Determine if debug endpoints should be available
 DEBUG_MODE = os.getenv("DEBUG", "false").lower() == "true"

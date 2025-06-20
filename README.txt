@@ -111,12 +111,12 @@ Bearer <JWT_TOKEN>
 
 Now call:
 
-`GET /protected`
+`GET /me`
 
 Returns:
 
 ```json
 {
-  "message": "Welcome, <email>!"
+  "email": "<email>"
 }
 ```
