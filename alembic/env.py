@@ -1,6 +1,6 @@
 from logging.config import fileConfig
 import os
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import create_engine, pool
 from alembic import context
 from app.models import metadata
 
@@ -28,19 +28,26 @@ def run_migrations_offline():
         context.run_migrations()
 
 def run_migrations_online():
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section),
-        prefix="sqlalchemy.",
+    """Run migrations in 'online' mode (connect to the DB)."""
+    url = config.get_main_option("sqlalchemy.url")
+
+    # if using SQLite in tests, strip out the async driver
+    if url.startswith("sqlite+aiosqlite://"):
+        url = url.replace("sqlite+aiosqlite://", "sqlite:///")
+
+    engine = create_engine(
+        url,
         poolclass=pool.NullPool,
+        future=True,
     )
-    with connectable.connect() as connection:
+    with engine.begin() as connection:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
         )
-        with context.begin_transaction():
-            context.run_migrations()
+        context.run_migrations()
 
+# pick the right mode
 if context.is_offline_mode():
     run_migrations_offline()
 else:
