@@ -7,6 +7,9 @@ from jose import jwt
 import os
 from pydantic import BaseModel
 
+# Determine if debug endpoints should be available
+DEBUG_MODE = os.getenv("DEBUG", "false").lower() == "true"
+
 class UserRegister(BaseModel):
     email: str
     password: str
@@ -50,7 +53,8 @@ async def get_me(credentials: HTTPAuthorizationCredentials = Depends(bearer_sche
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
     
-@router.get("/debug/users")
-async def debug_list_users():
-    rows = await database.fetch_all("SELECT id, email, password FROM users;")
-    return [dict(row) for row in rows]
+if DEBUG_MODE:
+    @router.get("/debug/users")
+    async def debug_list_users():
+        rows = await database.fetch_all("SELECT id, email, password FROM users;")
+        return [dict(row) for row in rows]
