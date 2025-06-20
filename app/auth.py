@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
+import os
 
-SECRET_KEY = "super-secret-key-change-this"
+SECRET_KEY = os.getenv("JWT_SECRET")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
