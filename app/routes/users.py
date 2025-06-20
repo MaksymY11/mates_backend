@@ -4,7 +4,7 @@ from app.database import database
 from app.models import users
 from passlib.context import CryptContext
 from jose import jwt
-import os
+from app.auth import SECRET_KEY
 from pydantic import BaseModel
 
 class UserRegister(BaseModel):
@@ -17,7 +17,6 @@ class UserLogin(BaseModel):
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-JWT_SECRET = os.getenv("JWT_SECRET", "supersecretkey")
 bearer_scheme = HTTPBearer()
 
 @router.post("/registerUser")
@@ -38,14 +37,14 @@ async def login_user(user: UserLogin):
     if not db_user or not pwd_context.verify(user.password, db_user["password"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     # Generate a JWT token
-    token = jwt.encode({"email": db_user["email"]}, JWT_SECRET, algorithm="HS256")
+    token = jwt.encode({"email": db_user["email"]}, SECRET_KEY, algorithm="HS256")
     return {"access_token": token, "token_type": "bearer"}
 
 @router.get("/me")
 async def get_me(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
     token = credentials.credentials
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
         return {"email": payload["email"]}
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
