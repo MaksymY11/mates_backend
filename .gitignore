@@ -14,3 +14,4 @@ mates.db
 # IDE/project files you don’t want committed
 .idea/
 .vscode/
+.env
