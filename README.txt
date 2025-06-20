@@ -13,19 +13,19 @@ Full backend for the Mates project using:
 
 ## 🗂️ Project Structure
 app/
-├── init.py
-├── main.py # FastAPI entry point
-├── database.py # DB connection
-├── models.py # DB models
-├── schemas.py # Pydantic schemas
-├── crud.py # DB operations
-├── security.py # Password hashing
-├── auth.py # JWT token logic
+├── __init__.py
+├── main.py          # FastAPI entry point
+├── database.py      # DB connection
+├── models.py        # DB models
+├── schemas.py       # Pydantic schemas
+├── crud.py          # DB operations
+├── security.py      # Password hashing
+├── auth.py          # JWT token logic
 └── routes/
-├── init.py
-└── users.py # API routes
-mates.db # SQLite file
-requirements.txt # Dependencies
+    ├── __init__.py
+    └── users.py     # API routes
+mates.db             # SQLite file
+requirements.txt     # Dependencies
 
 ---
 
@@ -36,20 +36,36 @@ requirements.txt # Dependencies
 ```bash
 python -m venv venv
 source venv/bin/activate        # Mac/Linux
-venv\Scripts\activate           # Windows
+venv\Scripts\activate         # Windows
+```
+
 ### 2️⃣ Install dependencies
 
 ```bash
 pip install -r requirements.txt
-If needed:
-```bash
+# If needed:
 pip install fastapi uvicorn sqlalchemy databases aiosqlite passlib[bcrypt] python-jose[cryptography]
+```
+
+### 3️⃣ Set environment variables
+
+Copy `.env.example` to `.env` and update the values:
+
+```bash
+cp .env.example .env
+# Edit .env and set:
+# DATABASE_URL=sqlite+aiosqlite:///./mates.db
+# JWT_SECRET=supersecretkey
+```
 
 ---
 
 ## 🚀 Run server locally
 
+```bash
 uvicorn app.main:app --reload
+```
+
 Server will be available at:
 http://127.0.0.1:8000
 Swagger API docs:
@@ -57,38 +73,50 @@ http://127.0.0.1:8000/docs
 
 ---
 
-##🔐 Auth Flow
+## 🔐 Auth Flow
 
 ### 1️⃣ Registration (No auth required)
 
-POST /registerUser
+`POST /registerUser`
 
+```json
 {
   "email": "test@example.com",
   "password": "yourpassword"
 }
+```
 
 ### 2️⃣ Login (No auth required)
 
-POST /loginUser
+`POST /loginUser`
+
 Returns:
+
+```json
 {
   "access_token": "<JWT_TOKEN>",
   "token_type": "bearer"
 }
+```
 
 ### 3️⃣ Protected routes
 
 Click 🔒 Authorize button in Swagger
 
 Paste token as:
+
+```
 Bearer <JWT_TOKEN>
+```
+
 Now call:
 
-GET /protected
+`GET /protected`
 
 Returns:
 
+```json
 {
   "message": "Welcome, <email>!"
 }
+```
