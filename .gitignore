@@ -1,0 +1,16 @@
+# virtual envs
+venv/
+.venv/
+env/
+
+# Python byte-code & caches
+__pycache__/
+*.py[cod]
+
+# local DB files
+mates.db
+*.sqlite3
+
+# IDE/project files you don’t want committed
+.idea/
+.vscode/
