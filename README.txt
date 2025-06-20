@@ -56,6 +56,8 @@ cp .env.example .env
 # Edit .env and set:
 # DATABASE_URL=sqlite+aiosqlite:///./mates.db
 # JWT_SECRET=supersecretkey
+# ACCESS_TOKEN_EXPIRE_MINUTES=30
+# REFRESH_TOKEN_EXPIRE_MINUTES=43200
 ```
 
 ---
@@ -98,6 +100,25 @@ Returns:
   "token_type": "bearer"
 }
 ```
+
+The access token includes an expiration claim so you'll need to refresh it
+periodically using the endpoint below. The default lifetime is
+`ACCESS_TOKEN_EXPIRE_MINUTES` (30 minutes).
+
+### ♻️ Refresh token
+
+`POST /refreshToken`
+
+Send request with the `refresh_token` cookie returned during login. Returns a new
+access token and rotates the refresh token cookie. The cookie is HTTP only,
+`Secure` and `SameSite=Strict`. Refresh tokens expire based on
+`REFRESH_TOKEN_EXPIRE_MINUTES`.
+
+### 🔓 Logout
+
+`POST /logout`
+
+Clears the refresh token cookie and invalidates it server side.
 
 ### 3️⃣ Protected routes
 
