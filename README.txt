@@ -120,6 +120,8 @@ access token and rotates the refresh token cookie. The cookie is HTTP only,
 
 Clears the refresh token cookie and invalidates it server side.
 
+Send request with the `refresh_token` cookie returned during login. Returns a new access token and rotates the refresh token cookie.
+
 ### 3️⃣ Protected routes
 
 Click 🔒 Authorize button in Swagger
