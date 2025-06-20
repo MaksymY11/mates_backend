@@ -8,7 +8,7 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision = '1_add_refresh_tokens'
+revision = '1'
 down_revision = '9e413e918fa4'
 branch_labels = None
 depends_on = None
