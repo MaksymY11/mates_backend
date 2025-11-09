@@ -1,4 +1,4 @@
-from fastapi import Depends, APIRouter, HTTPException, Response, Request
+from fastapi import Depends, APIRouter, HTTPException, Response, Request, Body
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.database import database
 from app.models import users, refresh_tokens
@@ -128,10 +128,34 @@ async def get_current_user(
 
 @router.get("/me")
 async def get_me(payload: dict = Depends(get_current_user)):
-    return {"email": payload["email"]}
+    email = payload["email"]
+    query = users.select().where(users.c.email == email)
+    record = await database.fetch_one(query)
+    if not record:
+        raise HTTPException(status_code=404, detail="User not found")
+    return dict(record)
     
 if DEBUG_MODE:
     @router.get("/debug/users")
     async def debug_list_users(payload: dict = Depends(get_current_user)):
         rows = await database.fetch_all("SELECT id, email, password FROM users;")
         return [dict(row) for row in rows]
+    
+@router.post("/updateUser")
+async def update_user(
+    payload: dict = Depends(get_current_user),
+    data: dict = Body(...),
+):
+    email = payload["email"]
+
+    # filter allowed fields
+    allowed = {"name", "city", "bio", "age"}
+    update_data = {k: v for k, v in data.items() if k in allowed}
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+
+    # dynamically build SET clause
+    query = users.update().where(users.c.email == email).values(**update_data)
+    await database.execute(query)
+    return {"detail": "Profile updated successfully"}

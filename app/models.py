@@ -8,6 +8,10 @@ users = Table(
     Column("id", Integer, primary_key=True),
     Column("email", String, unique=True, index=True),
     Column("password", String),
+    Column("name", String, nullable=True),
+    Column("city", String, nullable=True),
+    Column("bio", String, nullable=True),
+    Column("age", Integer, nullable=True),
 )
 
 refresh_tokens = Table(
