@@ -149,7 +149,7 @@ async def update_user(
     email = payload["email"]
 
     # filter allowed fields
-    allowed = {"name", "city", "bio", "age"}
+    allowed = {"name", "city", "bio", "age", "state", "budget", "move_in_date", "lifestyle", "activities", "prefs"}
     update_data = {k: v for k, v in data.items() if k in allowed}
 
     if not update_data:
