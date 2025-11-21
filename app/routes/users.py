@@ -152,6 +152,15 @@ async def update_user(
     allowed = {"name", "city", "bio", "age", "state", "budget", "move_in_date", "lifestyle", "activities", "prefs"}
     update_data = {k: v for k, v in data.items() if k in allowed}
 
+    if "move_in_date" in update_data:
+        v = update_data["move_in_date"]
+        if isinstance(v, str):
+            try:
+                parsed = datetime.fromisoformat(v)
+                update_data["move_in_date"] = parsed.date()
+            except ValueError:
+                update_data.pop("move_in_date")  # remove invalid date
+
     if not update_data:
         raise HTTPException(status_code=400, detail="No valid fields to update")
 
