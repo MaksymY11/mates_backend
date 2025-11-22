@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, Date, Table, Column, Integer, String, DateTime, MetaData
+from sqlalchemy import JSON, Table, Column, Integer, String, DateTime, MetaData
 
 metadata = MetaData()
 
@@ -8,6 +8,7 @@ users = Table(
     Column("id", Integer, primary_key=True),
     Column("email", String, unique=True, index=True),
     Column("password", String),
+    Column("avatar_url", String, nullable=True),
     Column("name", String, nullable=True),
     Column("age", Integer, nullable=True),
     Column("state", String, nullable=True),

@@ -1,4 +1,4 @@
-from fastapi import Depends, APIRouter, HTTPException, Response, Request, Body
+from fastapi import Depends, APIRouter, HTTPException, Response, Request, Body, UploadFile, File
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.database import database
 from app.models import users, refresh_tokens
@@ -12,7 +12,22 @@ from app.auth import (
 from pydantic import BaseModel
 import os
 import secrets
+import uuid
+import shutil
+from pathlib import Path
 from datetime import datetime, timedelta
+from PIL import Image, UnidentifiedImageError
+import aiofiles
+
+# Use a local writable static folder by default so avatars persist locally.
+# Set `BASE_URL` in your env (e.g. https://example.com) to return full URLs;
+# otherwise a relative path will be returned (served from /static).
+AVATAR_DIR = Path("static/avatars")  # local relative to project root
+BASE_URL = os.getenv("BASE_URL", "").strip()
+if BASE_URL:
+    AVATAR_URL_PREFIX = BASE_URL.rstrip("/") + "/static/avatars"
+else:
+    AVATAR_URL_PREFIX = "/static/avatars"
 
 # Determine if debug endpoints should be available
 DEBUG_MODE = os.getenv("DEBUG", "false").lower() == "true"
@@ -168,3 +183,117 @@ async def update_user(
     query = users.update().where(users.c.email == email).values(**update_data)
     await database.execute(query)
     return {"detail": "Profile updated successfully"}
+
+@router.post("/uploadAvatar")
+async def upload_avatar(
+    file: UploadFile = File(...),
+    request: Request = None,
+    payload: dict = Depends(get_current_user),
+):
+    # Basic client-provided MIME check (still validate content below)
+    if file.content_type not in ("image/jpeg", "image/png", "image/gif"):
+        raise HTTPException(status_code=400, detail="Unsupported image type")
+
+    MAX_BYTES = 5 * 1024 * 1024
+
+    # Ensure avatar dir exists
+    AVATAR_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Stream upload to a temporary file to avoid loading whole file into memory
+    tmp_name = f"tmp_{uuid.uuid4().hex}"
+    tmp_path = AVATAR_DIR / tmp_name
+    total = 0
+    try:
+        async with aiofiles.open(tmp_path, "wb") as afp:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_BYTES:
+                    # cleanup
+                    try:
+                        await afp.close()
+                    except Exception:
+                        pass
+                    tmp_path.unlink(missing_ok=True)
+                    raise HTTPException(status_code=400, detail="File too large")
+                await afp.write(chunk)
+
+        # Validate image file using Pillow to avoid spoofed content-type
+        try:
+            with Image.open(tmp_path) as img:
+                img.verify()
+                fmt = img.format  # e.g. 'JPEG', 'PNG', 'GIF'
+        except UnidentifiedImageError:
+            tmp_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail="Uploaded file is not a valid image")
+
+        fmt = (fmt or "JPEG").upper()
+        ext_map = {"JPEG": ".jpg", "JPG": ".jpg", "PNG": ".png", "GIF": ".gif"}
+        ext = ext_map.get(fmt, Path(file.filename).suffix or ".jpg")
+
+        filename = f"{uuid.uuid4().hex}{ext}"
+        target = AVATAR_DIR / filename
+
+        # Move temp file into final filename (atomic on most OSes)
+        tmp_path.replace(target)
+
+        # Build avatar URL: prefer configured BASE_URL, otherwise use request.base_url
+        prefix = AVATAR_URL_PREFIX
+        if not BASE_URL and request is not None:
+            base = str(request.base_url).rstrip("/")
+            prefix = base + "/static/avatars"
+        avatar_url = f"{prefix}/{filename}"
+
+        # create a thumbnail (small size) to serve to mobile clients and save alongside
+        try:
+            thumb_size = (200, 200)
+            thumb_name = f"{Path(filename).stem}_thumb.jpg"
+            thumb_path = AVATAR_DIR / thumb_name
+            with Image.open(target) as im:
+                im = im.convert("RGB")
+                im.thumbnail(thumb_size)
+                im.save(thumb_path, format="JPEG", quality=85)
+            thumb_url = f"{prefix}/{thumb_name}"
+        except Exception:
+            thumb_url = None
+
+        # update user's avatar_url in DB, but first remember previous avatar to delete
+        email = payload["email"]
+        # fetch existing avatar_url
+        row = await database.fetch_one(users.select().where(users.c.email == email))
+        prev_avatar = row.get("avatar_url") if row else None
+
+        try:
+            await database.execute(
+                users.update().where(users.c.email == email).values(avatar_url=avatar_url)
+            )
+        except Exception:
+            # rollback - delete the newly written file
+            try:
+                target.unlink(missing_ok=True)
+            except Exception:
+                pass
+            raise HTTPException(status_code=500, detail="Failed to update avatar")
+
+        # Delete previous avatar file if it was stored locally under our static folder
+        if prev_avatar:
+            try:
+                # prev_avatar may be absolute URL or relative path; extract filename if it points to /static/avatars
+                if prev_avatar.startswith(AVATAR_URL_PREFIX) or prev_avatar.startswith("/static/avatars"):
+                    prev_fname = Path(prev_avatar).name
+                    prev_path = AVATAR_DIR / prev_fname
+                    if prev_path.exists():
+                        prev_path.unlink(missing_ok=True)
+            except Exception:
+                # non-fatal cleanup error
+                pass
+
+        return {"avatar_url": avatar_url, "avatar_thumb_url": thumb_url}
+    finally:
+        # ensure UploadFile resources are closed
+        try:
+            await file.close()
+        except Exception:
+            pass
