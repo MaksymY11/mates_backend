@@ -228,6 +228,9 @@ async def upload_avatar(
         except UnidentifiedImageError:
             tmp_path.unlink(missing_ok=True)
             raise HTTPException(status_code=400, detail="Uploaded file is not a valid image")
+        except Exception as e:
+            tmp_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail="Invalid image file")
 
         fmt = (fmt or "JPEG").upper()
         ext_map = {"JPEG": ".jpg", "JPG": ".jpg", "PNG": ".png", "GIF": ".gif"}
@@ -247,17 +250,20 @@ async def upload_avatar(
         avatar_url = f"{prefix}/{filename}"
 
         # create a thumbnail (small size) to serve to mobile clients and save alongside
+        thumb_url = None
         try:
-            thumb_size = (200, 200)
-            thumb_name = f"{Path(filename).stem}_thumb.jpg"
-            thumb_path = AVATAR_DIR / thumb_name
+            # Re-open the file to create thumbnail (verify() closed the previous handle)
             with Image.open(target) as im:
-                im = im.convert("RGB")
-                im.thumbnail(thumb_size)
-                im.save(thumb_path, format="JPEG", quality=85)
-            thumb_url = f"{prefix}/{thumb_name}"
-        except Exception:
-            thumb_url = None
+                thumb_size = (200, 200)
+                thumb_name = f"{Path(filename).stem}_thumb.jpg"
+                thumb_path = AVATAR_DIR / thumb_name
+                im_rgb = im.convert("RGB")
+                im_rgb.thumbnail(thumb_size)
+                im_rgb.save(thumb_path, format="JPEG", quality=85)
+                thumb_url = f"{prefix}/{thumb_name}"
+        except Exception as thumb_err:
+            # Thumbnailing is non-critical, log and continue
+            pass
 
         # update user's avatar_url in DB, but first remember previous avatar to delete
         email = payload["email"]
