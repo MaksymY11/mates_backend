@@ -28,5 +28,8 @@ async def shutdown():
 # Register your user routes (they use the db via the imported 'database')
 app.include_router(users.router)
 
+# Ensure static directory exists before mounting (needed for Render where directories may not exist at deploy time)
+Path("static").mkdir(parents=True, exist_ok=True)
+
 # Serve local static files at /static (files under project `static/`)
 app.mount("/static", StaticFiles(directory="static"), name="static")
