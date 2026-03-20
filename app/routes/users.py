@@ -47,7 +47,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer()
 
 @router.post("/registerUser")
-async def register_user(user: UserRegister, db: AsyncSession = Depends(get_db)):
+async def register_user(user: UserRegister, response: Response, db: AsyncSession = Depends(get_db)):
     # user.email and user.password (dot notation)
     hashed_password = pwd_context.hash(user.password)
     try:
@@ -55,10 +55,34 @@ async def register_user(user: UserRegister, db: AsyncSession = Depends(get_db)):
             insert(users).values(email=user.email, password=hashed_password)
         )
         await db.commit()
-        return {"msg": "User created"}
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=400, detail= str(e))
+    
+    # Auto login after registration
+    access_token = create_access_token(
+        {"email" : user.email},
+        expires_delta= timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+    r_token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes= REFRESH_TOKEN_EXPIRE_MINUTES)
+    await db.execute(
+        insert(refresh_tokens).values(
+            token = r_token,
+            user_email = user.email,
+            expires_at = expires_at,
+        )
+    )
+    await db.commit()
+    response.set.cookie(
+        "refresh_token",
+        r_token,
+        httponly= True,
+        secure= True,
+        samesite= "strict",
+        max_age= REFRESH_TOKEN_EXPIRE_MINUTES * 60,
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
 
 @router.post("/loginUser")
 async def login_user(user: UserLogin, response: Response, db: AsyncSession = Depends(get_db)):
