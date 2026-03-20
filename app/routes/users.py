@@ -57,7 +57,7 @@ async def register_user(user: UserRegister, response: Response, db: AsyncSession
         await db.commit()
     except Exception as e:
         await db.rollback()
-        raise HTTPException(status_code=400, detail= str(e))
+        raise HTTPException(status_code=400, detail= "User already exists")
     
     # Auto login after registration
     access_token = create_access_token(
@@ -65,7 +65,7 @@ async def register_user(user: UserRegister, response: Response, db: AsyncSession
         expires_delta= timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
     r_token = secrets.token_urlsafe(32)
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes= REFRESH_TOKEN_EXPIRE_MINUTES)
+    expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes= REFRESH_TOKEN_EXPIRE_MINUTES)
     await db.execute(
         insert(refresh_tokens).values(
             token = r_token,
@@ -74,7 +74,7 @@ async def register_user(user: UserRegister, response: Response, db: AsyncSession
         )
     )
     await db.commit()
-    response.set.cookie(
+    response.set_cookie(
         "refresh_token",
         r_token,
         httponly= True,
@@ -97,7 +97,7 @@ async def login_user(user: UserLogin, response: Response, db: AsyncSession = Dep
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
     r_token = secrets.token_urlsafe(32)
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES)
+    expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES)
     await db.execute(
         insert(refresh_tokens).values(
             token= r_token,
@@ -125,15 +125,15 @@ async def refresh_token(request: Request, response: Response, db: AsyncSession =
     result = await db.execute(
         select(refresh_tokens).where(refresh_tokens.c.token == r_token)
     )
-    record = await result.fetchone()
-    if not record or record.expires_at < datetime.now(timezone.utc):
+    record = result.fetchone()
+    if not record or record.expires_at < datetime.now(timezone.utc).replace(tzinfo=None):
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
     await db.execute(
         delete(refresh_tokens).where(refresh_tokens.c.token == r_token)
     )
     new_r_token = secrets.token_urlsafe(32)
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES)
+    expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES)
     await db.execute(
         insert(refresh_tokens).values(
             token= new_r_token,
