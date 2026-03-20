@@ -271,7 +271,7 @@ async def upload_avatar(
         email = payload["email"]
         # fetch existing avatar_url
         row = await database.fetch_one(users.select().where(users.c.email == email))
-        prev_avatar = row.get("avatar_url") if row else None
+        prev_avatar = row["avatar_url"] if row else None
 
         try:
             await database.execute(
