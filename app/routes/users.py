@@ -140,7 +140,7 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="Invalid token")
     return payload
 
-
+# Returning logged-in user's profile data
 @router.get("/me")
 async def get_me(payload: dict = Depends(get_current_user)):
     email = payload["email"]
@@ -148,7 +148,9 @@ async def get_me(payload: dict = Depends(get_current_user)):
     record = await database.fetch_one(query)
     if not record:
         raise HTTPException(status_code=404, detail="User not found")
-    return dict(record)
+    data = dict(record)
+    data.pop("password", None) # prevent leaking bcrypt hash
+    return dict(data)
     
 if DEBUG_MODE:
     @router.get("/debug/users")

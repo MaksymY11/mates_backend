@@ -9,7 +9,12 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # or use ["https://685357a1d86235357f60edb5--matesv1.netlify.app"] in prod!
+    allow_origins=[
+        "https://matesv1.netlify.app",
+        "https://mates-backend-dxma.onrender.com",
+        "http://localhost:3000",
+        "http://localhost:8080"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
