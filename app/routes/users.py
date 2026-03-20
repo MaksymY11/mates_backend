@@ -56,9 +56,9 @@ async def register_user(user: UserRegister, db: AsyncSession = Depends(get_db)):
         )
         await db.commit()
         return {"msg": "User created"}
-    except Exception:
+    except Exception as e:
         await db.rollback()
-        raise HTTPException(status_code=400, detail="User already exists")
+        raise HTTPException(status_code=400, detail= str(e))
 
 @router.post("/loginUser")
 async def login_user(user: UserLogin, response: Response, db: AsyncSession = Depends(get_db)):
