@@ -1,6 +1,8 @@
 from fastapi import Depends, APIRouter, HTTPException, Response, Request, Body, UploadFile, File
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from app.database import database
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, update, delete, insert
+from app.database import get_db
 from app.models import users, refresh_tokens
 from passlib.context import CryptContext
 from app.auth import (
@@ -15,7 +17,7 @@ import secrets
 import uuid
 import shutil
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from PIL import Image, UnidentifiedImageError
 import aiofiles
 
@@ -45,37 +47,41 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer()
 
 @router.post("/registerUser")
-async def register_user(user: UserRegister):
+async def register_user(user: UserRegister, db: AsyncSession = Depends(get_db)):
     # user.email and user.password (dot notation)
     hashed_password = pwd_context.hash(user.password)
-    query = users.insert().values(email=user.email, password=hashed_password)
     try:
-        await database.execute(query)
+        await db.execute(
+            insert(users).values(email=user.email, password=hashed_password)
+        )
+        await db.commit()
         return {"msg": "User created"}
     except Exception:
+        await db.rollback()
         raise HTTPException(status_code=400, detail="User already exists")
 
 @router.post("/loginUser")
-async def login_user(user: UserLogin, response: Response):
-    query = users.select().where(users.c.email == user.email)
-    db_user = await database.fetch_one(query)
-    if not db_user or not pwd_context.verify(user.password, db_user["password"]):
+async def login_user(user: UserLogin, response: Response, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(users).where(users.c.email == user.email))
+    db_user = result.fetchone()
+    if not db_user or not pwd_context.verify(user.password, db_user.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     # Generate tokens with expiration
     access_token = create_access_token(
-        {"email": db_user["email"]},
+        {"email": db_user.email},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
     r_token = secrets.token_urlsafe(32)
-    expires_at = datetime.utcnow() + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES)
-    await database.execute(
-        refresh_tokens.insert().values(
-            token=r_token,
-            user_email=db_user["email"],
-            expires_at=expires_at,
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES)
+    await db.execute(
+        insert(refresh_tokens).values(
+            token= r_token,
+            user_email= db_user.email,
+            expires_at= expires_at,
         )
     )
+    await db.commit()
     response.set_cookie(
         "refresh_token",
         r_token,
@@ -87,29 +93,32 @@ async def login_user(user: UserLogin, response: Response):
     return {"access_token": access_token, "token_type": "bearer"}
 
 @router.post("/refreshToken")
-async def refresh_token(request: Request, response: Response):
+async def refresh_token(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     r_token = request.cookies.get("refresh_token")
     if not r_token:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
-    record = await database.fetch_one(
-        refresh_tokens.select().where(refresh_tokens.c.token == r_token)
+    
+    result = await db.execute(
+        select(refresh_tokens).where(refresh_tokens.c.token == r_token)
     )
-    if not record or record["expires_at"] < datetime.utcnow():
+    record = await result.fetchone()
+    if not record or record.expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
-    await database.execute(
-        refresh_tokens.delete().where(refresh_tokens.c.token == r_token)
+    await db.execute(
+        delete(refresh_tokens).where(refresh_tokens.c.token == r_token)
     )
     new_r_token = secrets.token_urlsafe(32)
-    expires_at = datetime.utcnow() + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES)
-    await database.execute(
-        refresh_tokens.insert().values(
-            token=new_r_token,
-            user_email=record["user_email"],
-            expires_at=expires_at,
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES)
+    await db.execute(
+        insert(refresh_tokens).values(
+            token= new_r_token,
+            user_email= record.user_email,
+            expires_at= expires_at,
         )
     )
-    new_access_token = create_access_token({"email": record["user_email"]})
+    await db.commit()
+    new_access_token = create_access_token({"email": record.user_email})
     response.set_cookie(
         "refresh_token",
         new_r_token,
@@ -122,12 +131,13 @@ async def refresh_token(request: Request, response: Response):
 
 
 @router.post("/logout")
-async def logout(request: Request, response: Response):
+async def logout(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     r_token = request.cookies.get("refresh_token")
     if r_token:
-        await database.execute(
-            refresh_tokens.delete().where(refresh_tokens.c.token == r_token)
+        await db.execute(
+            delete(refresh_tokens).where(refresh_tokens.c.token == r_token)
         )
+        await db.commit()
     response.delete_cookie("refresh_token")
     return {"detail": "logged out"}
 
@@ -142,26 +152,22 @@ async def get_current_user(
 
 # Returning logged-in user's profile data
 @router.get("/me")
-async def get_me(payload: dict = Depends(get_current_user)):
+async def get_me(payload: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     email = payload["email"]
-    query = users.select().where(users.c.email == email)
-    record = await database.fetch_one(query)
+    result = await db.execute(select(users).where(users.c.email == email))
+    record = result.fetchone()
     if not record:
         raise HTTPException(status_code=404, detail="User not found")
-    data = dict(record)
+    data = dict(record._mapping)
     data.pop("password", None) # prevent leaking bcrypt hash
-    return dict(data)
+    return data
     
-if DEBUG_MODE:
-    @router.get("/debug/users")
-    async def debug_list_users(payload: dict = Depends(get_current_user)):
-        rows = await database.fetch_all("SELECT id, email, password FROM users;")
-        return [dict(row) for row in rows]
     
 @router.post("/updateUser")
 async def update_user(
     payload: dict = Depends(get_current_user),
     data: dict = Body(...),
+    db: AsyncSession = Depends(get_db)
 ):
     email = payload["email"]
 
@@ -181,9 +187,10 @@ async def update_user(
     if not update_data:
         raise HTTPException(status_code=400, detail="No valid fields to update")
 
-    # dynamically build SET clause
-    query = users.update().where(users.c.email == email).values(**update_data)
-    await database.execute(query)
+    await db.execute(
+        update(users).where(users.c.email == email).values(**update_data)
+    )
+    await db.commit()
     return {"detail": "Profile updated successfully"}
 
 @router.post("/uploadAvatar")
@@ -191,13 +198,13 @@ async def upload_avatar(
     file: UploadFile = File(...),
     request: Request = None,
     payload: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ):
     # Basic client-provided MIME check (still validate content below)
     if file.content_type not in ("image/jpeg", "image/png", "image/gif"):
         raise HTTPException(status_code=400, detail="Unsupported image type")
 
     MAX_BYTES = 5 * 1024 * 1024
-
     # Ensure avatar dir exists
     AVATAR_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -230,7 +237,7 @@ async def upload_avatar(
         except UnidentifiedImageError:
             tmp_path.unlink(missing_ok=True)
             raise HTTPException(status_code=400, detail="Uploaded file is not a valid image")
-        except Exception as e:
+        except Exception:
             tmp_path.unlink(missing_ok=True)
             raise HTTPException(status_code=400, detail="Invalid image file")
 
@@ -240,7 +247,6 @@ async def upload_avatar(
 
         filename = f"{uuid.uuid4().hex}{ext}"
         target = AVATAR_DIR / filename
-
         # Move temp file into final filename (atomic on most OSes)
         tmp_path.replace(target)
 
@@ -263,20 +269,22 @@ async def upload_avatar(
                 im_rgb.thumbnail(thumb_size)
                 im_rgb.save(thumb_path, format="JPEG", quality=85)
                 thumb_url = f"{prefix}/{thumb_name}"
-        except Exception as thumb_err:
+        except Exception:
             # Thumbnailing is non-critical, log and continue
             pass
 
         # update user's avatar_url in DB, but first remember previous avatar to delete
         email = payload["email"]
         # fetch existing avatar_url
-        row = await database.fetch_one(users.select().where(users.c.email == email))
-        prev_avatar = row["avatar_url"] if row else None
+        result = await db.execute(select(users).where(users.c.email == email))
+        row = result.fetchone()
+        prev_avatar = row.avatar_url if row else None
 
         try:
-            await database.execute(
-                users.update().where(users.c.email == email).values(avatar_url=avatar_url)
+            await db.execute(
+                update(users).where(users.c.email == email).values(avatar_url=avatar_url)
             )
+            await db.commit()
         except Exception:
             # rollback - delete the newly written file
             try:
@@ -295,7 +303,6 @@ async def upload_avatar(
                     if prev_path.exists():
                         prev_path.unlink(missing_ok=True)
             except Exception:
-                # non-fatal cleanup error
                 pass
 
         return {"avatar_url": avatar_url, "avatar_thumb_url": thumb_url}
@@ -305,3 +312,13 @@ async def upload_avatar(
             await file.close()
         except Exception:
             pass
+
+if DEBUG_MODE:
+    @router.get("/debug/users")
+    async def debug_list_users(
+        payload: dict = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db)
+    ):
+        result = await db.execute(select(users.c.id, users.c.email, users.c.password))
+        rows = result.fetchall()
+        return [dict(row._mapping) for row in rows]

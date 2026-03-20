@@ -1,19 +1,29 @@
-from sqlalchemy import MetaData, create_engine
-from databases import Database
+from dotenv import load_dotenv
+load_dotenv()
+
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import MetaData
 import os
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-if DATABASE_URL is None:
-    raise RuntimeError("DATABASE_URL is not set. Please define it in your environment.")
-
-# Conditional connect args for SQLite
-connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+ASYNC_DATABASE_URL = os.getenv("ASYNC_DATABASE_URL")
+if not ASYNC_DATABASE_URL:
+    raise RuntimeError("ASYNC_DATABASE_URL is not set. Please define it in your environment.")
 
 # Create the engine
-engine = create_engine(DATABASE_URL, connect_args=connect_args)
+engine = create_async_engine(ASYNC_DATABASE_URL, echo=False)
 
-# Create metadata instance
+# Session factory, each request gets its own session
+AssyncSessionLocal = sessionmaker(
+    bind = engine,
+    class_ = AsyncSession,
+    expire_on_commit=False,
+)
+
+# Create metadata instance used by models & alembic
 metadata = MetaData()
 
-# Create async database instance for use in startup/shutdown
-database = Database(DATABASE_URL)
+# Dependency for FastAPI routes
+async def get_db():
+    async with AssyncSessionLocal() as session:
+        yield session

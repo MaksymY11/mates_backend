@@ -1,11 +1,20 @@
+from dotenv import load_dotenv
+load_dotenv()
+
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
-from app.database import database  # your async Database(...) instance
-from app.routes import users  # your APIRouter with /registerUser, /loginUser, etc
+from app.routes import users  # APIRouter with /registerUser, /loginUser, etc
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    Path("static/avatars").mkdir(parents=True,exist_ok=True)
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,21 +29,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.on_event("startup")
-async def startup():
-    # Ensure static folders exist for local avatar storage
-    Path("static/avatars").mkdir(parents=True, exist_ok=True)
-    await database.connect()
-
-@app.on_event("shutdown")
-async def shutdown():
-    await database.disconnect()
-
-# Register your user routes (they use the db via the imported 'database')
+# Register user routes
 app.include_router(users.router)
 
-# Ensure static directory exists before mounting (needed for Render where directories may not exist at deploy time)
+# Ensure static directory exists before mounting
 Path("static").mkdir(parents=True, exist_ok=True)
 
-# Serve local static files at /static (files under project `static/`)
+# Serve local static files at /static
 app.mount("/static", StaticFiles(directory="static"), name="static")
