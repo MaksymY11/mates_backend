@@ -11,7 +11,7 @@ from app.auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     REFRESH_TOKEN_EXPIRE_MINUTES,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
 import os
 import secrets
 import uuid
@@ -35,12 +35,12 @@ else:
 DEBUG_MODE = os.getenv("DEBUG", "false").lower() == "true"
 
 class UserRegister(BaseModel):
-    email: str
-    password: str
+    email: EmailStr
+    password: str = Field(min_length=8)
 
 class UserLogin(BaseModel):
-    email: str
-    password: str
+    email: EmailStr
+    password: str = Field(min_length=1)
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
