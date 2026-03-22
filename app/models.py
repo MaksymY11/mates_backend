@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, Table, Column, Integer, String, DateTime, MetaData
+from sqlalchemy import JSON, Table, Column, Integer, String, DateTime, MetaData, ForeignKey
 
 metadata = MetaData()
 
@@ -25,6 +25,6 @@ refresh_tokens = Table(
     "refresh_tokens",
     metadata,
     Column("token", String, primary_key=True, index=True),
-    Column("user_email", String, index=True),
+    Column("user_email", String, ForeignKey("users.email", ondelete="CASCADE"), index=True),
     Column("expires_at", DateTime),
 )

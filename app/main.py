@@ -20,7 +20,6 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://matesv1.netlify.app",
-        "https://mates-backend-dxma.onrender.com",
         "http://localhost:3000",
         "http://localhost:8080"
     ],

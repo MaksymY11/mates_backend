@@ -1,5 +1,7 @@
 from logging.config import fileConfig
 import os
+from dotenv import load_dotenv
+load_dotenv()
 from sqlalchemy import create_engine, pool
 from alembic import context
 from app.models import metadata
