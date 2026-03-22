@@ -2,6 +2,7 @@ from fastapi import Depends, APIRouter, HTTPException, Response, Request, Body, 
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, insert
+from sqlalchemy.exc import IntegrityError
 from app.database import get_db
 from app.models import users, refresh_tokens
 from passlib.context import CryptContext
@@ -55,9 +56,9 @@ async def register_user(user: UserRegister, response: Response, db: AsyncSession
             insert(users).values(email=user.email, password=hashed_password)
         )
         await db.commit()
-    except Exception as e:
+    except IntegrityError:
         await db.rollback()
-        raise HTTPException(status_code=400, detail= "User already exists")
+        raise HTTPException(status_code=409, detail="User already exists")
     
     # Auto login after registration
     access_token = create_access_token(
