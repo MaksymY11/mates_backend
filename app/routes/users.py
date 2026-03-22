@@ -5,7 +5,7 @@ from sqlalchemy import select, update, delete, insert
 from sqlalchemy.exc import IntegrityError
 from app.database import get_db
 from app.models import users, refresh_tokens
-from passlib.context import CryptContext
+from app.security import hash_password, verify_password
 from app.auth import (
     create_access_token,
     verify_access_token,
@@ -44,13 +44,12 @@ class UserLogin(BaseModel):
     password: str = Field(min_length=1)
 
 router = APIRouter()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer()
 
 @router.post("/registerUser")
 async def register_user(user: UserRegister, response: Response, db: AsyncSession = Depends(get_db)):
     # user.email and user.password (dot notation)
-    hashed_password = pwd_context.hash(user.password)
+    hashed_password = hash_password(user.password)
     try:
         await db.execute(
             insert(users).values(email=user.email, password=hashed_password)
@@ -89,7 +88,7 @@ async def register_user(user: UserRegister, response: Response, db: AsyncSession
 async def login_user(user: UserLogin, response: Response, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(users).where(users.c.email == user.email))
     db_user = result.fetchone()
-    if not db_user or not pwd_context.verify(user.password, db_user.password):
+    if not db_user or not verify_password(user.password, db_user.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     # Generate tokens with expiration
