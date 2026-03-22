@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from app.routes import users  # APIRouter with /registerUser, /loginUser, etc
+from app.routes import apartments  # APIRouter with /apartments/* endpoints
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -30,6 +31,7 @@ app.add_middleware(
 
 # Register user routes
 app.include_router(users.router)
+app.include_router(apartments.router)
 
 # Ensure static directory exists before mounting
 Path("static").mkdir(parents=True, exist_ok=True)

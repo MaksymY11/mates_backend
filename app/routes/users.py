@@ -1,11 +1,11 @@
 from fastapi import Depends, APIRouter, HTTPException, Response, Request, Body, UploadFile, File
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, insert
 from sqlalchemy.exc import IntegrityError
 from app.database import get_db
 from app.models import users, refresh_tokens
 from app.security import hash_password, verify_password
+from app.deps import bearer_scheme, get_current_user
 from app.auth import (
     create_access_token,
     verify_access_token,
@@ -44,7 +44,6 @@ class UserLogin(BaseModel):
     password: str = Field(min_length=1)
 
 router = APIRouter()
-bearer_scheme = HTTPBearer()
 
 @router.post("/registerUser")
 async def register_user(user: UserRegister, response: Response, db: AsyncSession = Depends(get_db)):
@@ -164,15 +163,6 @@ async def logout(request: Request, response: Response, db: AsyncSession = Depend
         await db.commit()
     response.delete_cookie("refresh_token")
     return {"detail": "logged out"}
-
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
-):
-    token = credentials.credentials
-    payload = verify_access_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    return payload
 
 # Returning logged-in user's profile data
 @router.get("/me")
