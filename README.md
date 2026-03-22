@@ -2,6 +2,8 @@
 
 Backend for the Mates roommate-matching app.
 
+> **License:** This project is source-available. See [LICENSE](LICENSE) for terms.
+
 - **Framework:** FastAPI
 - **Database:** PostgreSQL (Neon) via SQLAlchemy async + asyncpg
 - **Auth:** JWT access tokens + HTTP-only refresh token cookies
