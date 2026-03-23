@@ -1,6 +1,6 @@
 from fastapi import Depends, APIRouter, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, insert, update, delete, func
+from sqlalchemy import select, insert, update, func
 from app.database import get_db
 from app.models import (
     users,
@@ -207,11 +207,12 @@ async def answer_scenario(
     if body.selected_option not in valid_ids:
         raise HTTPException(status_code=400, detail="Invalid option")
 
-    # Check for duplicate response
+    # Check for duplicate active response
     result = await db.execute(
         select(scenario_responses).where(
             scenario_responses.c.user_id == user_id,
             scenario_responses.c.scenario_id == body.scenario_id,
+            scenario_responses.c.active == True,
         )
     )
     if result.fetchone():
