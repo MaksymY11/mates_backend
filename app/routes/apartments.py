@@ -13,6 +13,7 @@ from app.deps import get_current_user
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from collections import defaultdict
+from app.routes.vibe import recalculate_vibe
 
 router = APIRouter(prefix="/apartments", tags=["apartments"])
 
@@ -175,6 +176,9 @@ async def apply_preset(
         .where(apartments.c.id == apt.id)
         .values(updated_at=now)
     )
+    # Recalculate vibe before committing (atomic transaction)
+    await recalculate_vibe(db, user_id, commit=False)
+
     await db.commit()
 
     # Re-fetch and return
@@ -272,6 +276,9 @@ async def place_item(
         .where(apartments.c.id == apt.id)
         .values(updated_at=now)
     )
+    # Recalculate vibe before committing (atomic transaction)
+    await recalculate_vibe(db, user_id, commit=False)
+
     await db.commit()
 
     result = await db.execute(
@@ -314,6 +321,9 @@ async def remove_item(
         .where(apartments.c.id == apt.id)
         .values(updated_at=now)
     )
+    # Recalculate vibe before committing (atomic transaction)
+    await recalculate_vibe(db, user_id, commit=False)
+
     await db.commit()
 
     return {"detail": "Item removed"}

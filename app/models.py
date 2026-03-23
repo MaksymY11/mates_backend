@@ -71,3 +71,13 @@ apartment_items = Table(
     Column("position_x", Float, nullable=False, default=0),
     Column("position_y", Float, nullable=False, default=0),
 )
+
+preference_profiles = Table(
+    "preference_profiles",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False),
+    Column("weights", JSON, nullable=True),
+    Column("vibe_labels", JSON, nullable=True),
+    Column("updated_at", DateTime, nullable=False),
+)
