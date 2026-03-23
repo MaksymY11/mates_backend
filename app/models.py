@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, Table, Column, Integer, String, Float, DateTime, MetaData, ForeignKey, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, Table, Column, Integer, String, Float, DateTime, MetaData, ForeignKey, UniqueConstraint
 
 metadata = MetaData()
 
@@ -80,4 +80,35 @@ preference_profiles = Table(
     Column("weights", JSON, nullable=True),
     Column("vibe_labels", JSON, nullable=True),
     Column("updated_at", DateTime, nullable=False),
+)
+
+scenarios = Table(
+    "scenarios",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("prompt", String, nullable=False),
+    Column("options", JSON, nullable=False),
+    Column("active", Boolean, nullable=False, default=True),
+)
+
+scenario_responses = Table(
+    "scenario_responses",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("scenario_id", Integer, ForeignKey("scenarios.id", ondelete="CASCADE"), nullable=False),
+    Column("selected_option", String, nullable=False),
+    Column("answered_at", DateTime, nullable=False),
+    Column("active", Boolean, nullable=False, default=True),
+    UniqueConstraint("user_id", "scenario_id", name="uq_user_scenario"),
+)
+
+daily_scenario_assignments = Table(
+    "daily_scenario_assignments",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("scenario_id", Integer, ForeignKey("scenarios.id", ondelete="CASCADE"), nullable=False),
+    Column("assigned_date", Date, nullable=False),
+    Column("completed", Boolean, nullable=False, default=False),
 )
