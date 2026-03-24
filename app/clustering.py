@@ -90,13 +90,11 @@ def euclidean_distance(a: dict[str, float], b: dict[str, float]) -> float:
     return math.sqrt(total)
 
 
-def _cosine_similarity(a: dict[str, float], b: dict[str, float]) -> float:
-    dot = sum(a.get(d, 0) * b.get(d, 0) for d in DIMENSIONS)
-    mag_a = math.sqrt(sum(a.get(d, 0) ** 2 for d in DIMENSIONS))
-    mag_b = math.sqrt(sum(b.get(d, 0) ** 2 for d in DIMENSIONS))
-    if mag_a == 0 or mag_b == 0:
-        return 0.0
-    return dot / (mag_a * mag_b)
+def similarity_score(a: dict[str, float], b: dict[str, float]) -> float:
+    """Normalized Euclidean similarity: 1.0 = identical, 0.0 = maximally different."""
+    max_dist = math.sqrt(len(DIMENSIONS))  # worst case: all dims differ by 1.0
+    dist = euclidean_distance(a, b)
+    return 1.0 - (dist / max_dist)
 
 
 def _compute_centroid(profiles: list[dict[str, float]]) -> dict[str, float]:
@@ -209,7 +207,7 @@ def kmeans_cluster(
         members = []
         for i in members_indices:
             uid, weights = user_profiles[i]
-            sim = _cosine_similarity(weights, centroid)
+            sim = similarity_score(weights, centroid)
             members.append((uid, round(sim, 3)))
 
         clusters.append({

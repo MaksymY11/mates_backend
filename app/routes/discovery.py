@@ -17,6 +17,7 @@ from app.deps import get_current_user
 from app.clustering import (
     kmeans_cluster,
     euclidean_distance,
+    similarity_score,
     DEFAULT_K,
     NEW_ARRIVALS_NAME,
     NEW_ARRIVALS_DESC,
@@ -156,19 +157,21 @@ async def _user_summary(db: AsyncSession, user_id: int) -> dict:
     if not u:
         return {}
 
-    # Vibe labels
+    # Vibe labels + weights
     result = await db.execute(
-        select(preference_profiles.c.vibe_labels)
+        select(preference_profiles.c.vibe_labels, preference_profiles.c.weights)
         .where(preference_profiles.c.user_id == user_id)
     )
     prof = result.fetchone()
     vibe_labels = (prof.vibe_labels if prof else None) or []
+    weights = (prof.weights if prof else None) or {}
 
     return {
         "id": u.id,
         "name": u.name,
         "avatar_url": u.avatar_url,
         "vibe_labels": vibe_labels,
+        "_weights": weights,  # internal, stripped before response
     }
 
 
@@ -205,11 +208,18 @@ async def get_my_neighborhood(
     if not hood:
         raise HTTPException(status_code=404, detail="Neighborhood not found")
 
+    # Get current user's weights for user-to-user comparison
+    result = await db.execute(
+        select(preference_profiles.c.weights)
+        .where(preference_profiles.c.user_id == user_id)
+    )
+    my_prof = result.fetchone()
+    my_weights = (my_prof.weights if my_prof else None) or {}
+
     # Get all members
     result = await db.execute(
         select(
             neighborhood_members.c.user_id,
-            neighborhood_members.c.similarity_score,
         ).where(
             neighborhood_members.c.neighborhood_id == membership.neighborhood_id,
         )
@@ -222,7 +232,8 @@ async def get_my_neighborhood(
             continue
         summary = await _user_summary(db, mr.user_id)
         if summary:
-            summary["similarity_score"] = mr.similarity_score
+            their_weights = summary.pop("_weights", {})
+            summary["similarity_score"] = round(similarity_score(my_weights, their_weights), 3)
             neighbors.append(summary)
 
     # Sort by similarity descending
@@ -272,6 +283,14 @@ async def get_nearby_neighborhoods(
 
     my_centroid = my_hood.centroid
 
+    # Get current user's weights for user-to-user comparison
+    result = await db.execute(
+        select(preference_profiles.c.weights)
+        .where(preference_profiles.c.user_id == user_id)
+    )
+    my_prof = result.fetchone()
+    my_weights = (my_prof.weights if my_prof else None) or {}
+
     # Get all other neighborhoods
     result = await db.execute(
         select(neighborhoods).where(neighborhoods.c.id != my_hood_id)
@@ -307,7 +326,8 @@ async def get_nearby_neighborhoods(
         for sr in sample_rows:
             summary = await _user_summary(db, sr.user_id)
             if summary:
-                summary["similarity_score"] = sr.similarity_score
+                their_weights = summary.pop("_weights", {})
+                summary["similarity_score"] = round(similarity_score(my_weights, their_weights), 3)
                 sample_members.append(summary)
 
         nearby.append({
