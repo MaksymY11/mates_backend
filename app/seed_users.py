@@ -38,6 +38,7 @@ ARCHETYPES = [
     {
         "name": "Jordan",
         "email": "jordan@test.com",
+        "city": "San Diego", "state": "CA",
         "bio": "Early riser, clean freak, loves a good spreadsheet.",
         "furniture": [
             "Twin Bed", "Study Desk", "Desk Lamp", "Under-Bed Storage",
@@ -50,6 +51,7 @@ ARCHETYPES = [
     {
         "name": "Riley",
         "email": "riley@test.com",
+        "city": "San Diego", "state": "CA",
         "bio": "Night owl creative who paints at 2am.",
         "furniture": [
             "Queen Bed", "Art Desk", "LED Strip Lights", "Poster Wall",
@@ -62,6 +64,7 @@ ARCHETYPES = [
     {
         "name": "Casey",
         "email": "casey@test.com",
+        "city": "San Diego", "state": "CA",
         "bio": "Social butterfly, always hosting game night.",
         "furniture": [
             "Queen Bed", "Fairy Lights", "Bookshelf",
@@ -74,6 +77,7 @@ ARCHETYPES = [
     {
         "name": "Morgan",
         "email": "morgan@test.com",
+        "city": "Los Angeles", "state": "CA",
         "bio": "Wellness nerd. Yoga at dawn, smoothie by 7.",
         "furniture": [
             "Queen Bed", "Plant Collection", "Fairy Lights",
@@ -86,6 +90,7 @@ ARCHETYPES = [
     {
         "name": "Taylor",
         "email": "taylor@test.com",
+        "city": "Los Angeles", "state": "CA",
         "bio": "Minimalist to the core. If I don't need it, I don't own it.",
         "furniture": [
             "Twin Bed", "Study Desk", "Desk Lamp",
@@ -98,6 +103,7 @@ ARCHETYPES = [
     {
         "name": "Alex",
         "email": "alex@test.com",
+        "city": "Los Angeles", "state": "CA",
         "bio": "Bookworm and aspiring novelist. Libraries are my happy place.",
         "furniture": [
             "Loft Bed", "Study Desk", "Desk Lamp", "Bookshelf",
@@ -110,6 +116,7 @@ ARCHETYPES = [
     {
         "name": "Sam",
         "email": "sam@test.com",
+        "city": "San Diego", "state": "CA",
         "bio": "Home chef. My cast iron is seasoned better than your life.",
         "furniture": [
             "Queen Bed", "Fairy Lights", "Plant Collection",
@@ -122,6 +129,7 @@ ARCHETYPES = [
     {
         "name": "Jamie",
         "email": "jamie@test.com",
+        "city": "San Diego", "state": "CA",
         "bio": "Outdoorsy and active. My room smells like campfire.",
         "furniture": [
             "Twin Bed", "Plant Collection",
@@ -134,6 +142,7 @@ ARCHETYPES = [
     {
         "name": "Avery",
         "email": "avery@test.com",
+        "city": "New York", "state": "NY",
         "bio": "Cozy homebody. Blankets are a lifestyle.",
         "furniture": [
             "Queen Bed", "Fairy Lights", "Bookshelf", "Plant Collection",
@@ -146,6 +155,7 @@ ARCHETYPES = [
     {
         "name": "Quinn",
         "email": "quinn@test.com",
+        "city": "New York", "state": "NY",
         "bio": "Party in the front, organized in the back.",
         "furniture": [
             "Queen Bed", "LED Strip Lights", "Poster Wall",
@@ -158,6 +168,7 @@ ARCHETYPES = [
     {
         "name": "Drew",
         "email": "drew@test.com",
+        "city": "New York", "state": "NY",
         "bio": "Gym rat meets neat freak. Protein shaker always clean.",
         "furniture": [
             "Twin Bed", "Study Desk", "Desk Lamp", "Under-Bed Storage",
@@ -170,6 +181,7 @@ ARCHETYPES = [
     {
         "name": "Sage",
         "email": "sage@test.com",
+        "city": "Los Angeles", "state": "CA",
         "bio": "Art student. Creative chaos is my aesthetic.",
         "furniture": [
             "Loft Bed", "Art Desk", "LED Strip Lights", "Poster Wall",
@@ -223,6 +235,8 @@ async def seed():
                     password=hashed,
                     name=arch["name"],
                     bio=arch["bio"],
+                    city=arch.get("city"),
+                    state=arch.get("state"),
                 ).returning(users.c.id)
             )
             user_id = result.scalar_one()

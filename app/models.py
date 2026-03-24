@@ -19,6 +19,7 @@ users = Table(
     Column("lifestyle", JSON, nullable=True),
     Column("activities", JSON, nullable=True),
     Column("prefs", JSON, nullable=True),
+    Column("location_preference", String, nullable=False, server_default="same_city"),
 )
 
 refresh_tokens = Table(

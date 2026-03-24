@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from datetime import datetime, timezone
 from collections import defaultdict
 from app.routes.vibe import recalculate_vibe
+from app.routes.discovery import invalidate_neighborhood
 
 router = APIRouter(prefix="/apartments", tags=["apartments"])
 
@@ -178,6 +179,7 @@ async def apply_preset(
     )
     # Recalculate vibe before committing (atomic transaction)
     await recalculate_vibe(db, user_id, commit=False)
+    await invalidate_neighborhood(db, user_id)
 
     await db.commit()
 
@@ -278,6 +280,7 @@ async def place_item(
     )
     # Recalculate vibe before committing (atomic transaction)
     await recalculate_vibe(db, user_id, commit=False)
+    await invalidate_neighborhood(db, user_id)
 
     await db.commit()
 
@@ -323,6 +326,7 @@ async def remove_item(
     )
     # Recalculate vibe before committing (atomic transaction)
     await recalculate_vibe(db, user_id, commit=False)
+    await invalidate_neighborhood(db, user_id)
 
     await db.commit()
 

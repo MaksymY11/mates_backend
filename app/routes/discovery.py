@@ -43,6 +43,41 @@ async def _resolve_user_id(db: AsyncSession, payload: dict) -> int:
     return row.id
 
 
+async def _get_user_location(db: AsyncSession, user_id: int) -> dict:
+    """Get a user's city, state, and location_preference."""
+    result = await db.execute(
+        select(users.c.city, users.c.state, users.c.location_preference)
+        .where(users.c.id == user_id)
+    )
+    row = result.fetchone()
+    if not row:
+        return {}
+    return {
+        "city": row.city,
+        "state": row.state,
+        "location_preference": row.location_preference or "same_city",
+    }
+
+
+def _location_matches(my_loc: dict, their_city: str | None, their_state: str | None) -> bool:
+    """Check if another user matches the current user's location preference."""
+    pref = my_loc.get("location_preference", "same_city")
+    if pref == "anywhere":
+        return True
+    if pref == "same_state":
+        return (
+            my_loc.get("state") is not None
+            and my_loc.get("state") == their_state
+        )
+    # same_city (default)
+    return (
+        my_loc.get("city") is not None
+        and my_loc.get("state") is not None
+        and my_loc.get("city") == their_city
+        and my_loc.get("state") == their_state
+    )
+
+
 async def _run_clustering(db: AsyncSession) -> None:
     """Run full clustering and persist results."""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -116,6 +151,13 @@ async def _run_clustering(db: AsyncSession) -> None:
     await db.commit()
 
 
+async def invalidate_neighborhood(db: AsyncSession, user_id: int) -> None:
+    """Remove a user's neighborhood assignment so it reclusters on next visit."""
+    await db.execute(
+        delete(neighborhood_members).where(neighborhood_members.c.user_id == user_id)
+    )
+
+
 async def _ensure_clustering(db: AsyncSession, user_id: int) -> None:
     """Trigger re-clustering if the user has no assignment or it's stale."""
     result = await db.execute(
@@ -150,8 +192,10 @@ async def _ensure_clustering(db: AsyncSession, user_id: int) -> None:
 async def _user_summary(db: AsyncSession, user_id: int) -> dict:
     """Build a compact user summary dict for neighbor listings."""
     result = await db.execute(
-        select(users.c.id, users.c.name, users.c.avatar_url)
-        .where(users.c.id == user_id)
+        select(
+            users.c.id, users.c.name, users.c.avatar_url,
+            users.c.city, users.c.state, users.c.budget, users.c.move_in_date,
+        ).where(users.c.id == user_id)
     )
     u = result.fetchone()
     if not u:
@@ -170,6 +214,10 @@ async def _user_summary(db: AsyncSession, user_id: int) -> dict:
         "id": u.id,
         "name": u.name,
         "avatar_url": u.avatar_url,
+        "city": u.city,
+        "state": u.state,
+        "budget": u.budget,
+        "move_in_date": u.move_in_date.isoformat() if u.move_in_date else None,
         "vibe_labels": vibe_labels,
         "_weights": weights,  # internal, stripped before response
     }
@@ -208,15 +256,16 @@ async def get_my_neighborhood(
     if not hood:
         raise HTTPException(status_code=404, detail="Neighborhood not found")
 
-    # Get current user's weights for user-to-user comparison
+    # Get current user's weights and location for filtering + comparison
     result = await db.execute(
         select(preference_profiles.c.weights)
         .where(preference_profiles.c.user_id == user_id)
     )
     my_prof = result.fetchone()
     my_weights = (my_prof.weights if my_prof else None) or {}
+    my_loc = await _get_user_location(db, user_id)
 
-    # Get all members
+    # Get all members in my neighborhood
     result = await db.execute(
         select(
             neighborhood_members.c.user_id,
@@ -232,6 +281,9 @@ async def get_my_neighborhood(
             continue
         summary = await _user_summary(db, mr.user_id)
         if summary:
+            # Filter by location preference
+            if not _location_matches(my_loc, summary.get("city"), summary.get("state")):
+                continue
             their_weights = summary.pop("_weights", {})
             summary["similarity_score"] = round(similarity_score(my_weights, their_weights), 3)
             neighbors.append(summary)
@@ -290,6 +342,7 @@ async def get_nearby_neighborhoods(
     )
     my_prof = result.fetchone()
     my_weights = (my_prof.weights if my_prof else None) or {}
+    my_loc = await _get_user_location(db, user_id)
 
     # Get all other neighborhoods
     result = await db.execute(
@@ -306,36 +359,34 @@ async def get_nearby_neighborhoods(
 
     nearby = []
     for h, dist in scored[:3]:
-        # Count members
+        # Get all members, filter by location, count and sample
         result = await db.execute(
-            select(func.count())
-            .select_from(neighborhood_members)
+            select(neighborhood_members.c.user_id)
             .where(neighborhood_members.c.neighborhood_id == h.id)
         )
-        member_count = result.scalar() or 0
-
-        # Sample members (up to 3)
-        result = await db.execute(
-            select(neighborhood_members.c.user_id, neighborhood_members.c.similarity_score)
-            .where(neighborhood_members.c.neighborhood_id == h.id)
-            .order_by(neighborhood_members.c.similarity_score.desc())
-            .limit(3)
-        )
-        sample_rows = result.fetchall()
-        sample_members = []
-        for sr in sample_rows:
-            summary = await _user_summary(db, sr.user_id)
+        all_member_rows = result.fetchall()
+        matched_members = []
+        for mr in all_member_rows:
+            summary = await _user_summary(db, mr.user_id)
             if summary:
+                if not _location_matches(my_loc, summary.get("city"), summary.get("state")):
+                    continue
                 their_weights = summary.pop("_weights", {})
                 summary["similarity_score"] = round(similarity_score(my_weights, their_weights), 3)
-                sample_members.append(summary)
+                matched_members.append(summary)
+
+        if not matched_members:
+            continue
+
+        # Sort by similarity, take top 3 as samples
+        matched_members.sort(key=lambda x: x.get("similarity_score", 0), reverse=True)
 
         nearby.append({
             "id": h.id,
             "name": h.name,
             "vibe_description": h.vibe_description,
-            "member_count": member_count,
-            "sample_members": sample_members,
+            "member_count": len(matched_members),
+            "sample_members": matched_members[:3],
         })
 
     return {"nearby": nearby}
