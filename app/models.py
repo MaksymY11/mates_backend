@@ -103,6 +103,26 @@ scenario_responses = Table(
     UniqueConstraint("user_id", "scenario_id", name="uq_user_scenario"),
 )
 
+neighborhoods = Table(
+    "neighborhoods",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("name", String, nullable=False),
+    Column("centroid", JSON, nullable=True),
+    Column("vibe_description", String, nullable=True),
+    Column("updated_at", DateTime, nullable=False),
+)
+
+neighborhood_members = Table(
+    "neighborhood_members",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False),
+    Column("neighborhood_id", Integer, ForeignKey("neighborhoods.id", ondelete="CASCADE"), nullable=False),
+    Column("similarity_score", Float, nullable=True),
+    Column("assigned_at", DateTime, nullable=False),
+)
+
 daily_scenario_assignments = Table(
     "daily_scenario_assignments",
     metadata,

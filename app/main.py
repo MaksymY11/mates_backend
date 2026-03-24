@@ -10,6 +10,7 @@ from app.routes import users  # APIRouter with /registerUser, /loginUser, etc
 from app.routes import apartments  # APIRouter with /apartments/* endpoints
 from app.routes import vibe  # APIRouter with /vibe/* endpoints
 from app.routes import scenarios  # APIRouter with /scenarios/* endpoints
+from app.routes import discovery  # APIRouter with /discovery/* endpoints
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,6 +37,7 @@ app.include_router(users.router)
 app.include_router(apartments.router)
 app.include_router(vibe.router)
 app.include_router(scenarios.router)
+app.include_router(discovery.router)
 
 # Ensure static directory exists before mounting
 Path("static").mkdir(parents=True, exist_ok=True)
