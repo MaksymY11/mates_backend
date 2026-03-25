@@ -133,3 +133,48 @@ daily_scenario_assignments = Table(
     Column("assigned_date", Date, nullable=False),
     Column("completed", Boolean, nullable=False, default=False),
 )
+
+interests = Table(
+    "interests",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("from_user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("to_user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("created_at", DateTime, nullable=False),
+    UniqueConstraint("from_user_id", "to_user_id", name="uq_interest_pair"),
+)
+
+quick_pick_questions = Table(
+    "quick_pick_questions",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("prompt", String, nullable=False),
+    Column("option_a", String, nullable=False),
+    Column("option_b", String, nullable=False),
+    Column("category", String, nullable=False),
+)
+
+quick_pick_sessions = Table(
+    "quick_pick_sessions",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("user_a_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("user_b_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("status", String, nullable=False, server_default="pending_both"),
+    Column("questions", JSON, nullable=False),
+    Column("results_viewed_by", JSON, nullable=False, server_default="[]"),
+    Column("created_at", DateTime, nullable=False),
+    UniqueConstraint("user_a_id", "user_b_id", name="uq_quickpick_session_pair"),
+)
+
+quick_pick_answers = Table(
+    "quick_pick_answers",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("session_id", Integer, ForeignKey("quick_pick_sessions.id", ondelete="CASCADE"), nullable=False),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("question_index", Integer, nullable=False),
+    Column("selected_option", String, nullable=False),
+    Column("answered_at", DateTime, nullable=False),
+    UniqueConstraint("session_id", "user_id", "question_index", name="uq_quickpick_answer"),
+)
