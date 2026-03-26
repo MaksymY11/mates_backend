@@ -231,3 +231,33 @@ house_rule_votes = Table(
     Column("vote", Boolean, nullable=False),
     UniqueConstraint("rule_id", "user_id", name="uq_rule_user_vote"),
 )
+
+conversations = Table(
+    "conversations",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("type", String, nullable=False),  # "dm" or "group"
+    Column("household_id", Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=True, unique=True),
+    Column("created_at", DateTime, nullable=False),
+)
+
+conversation_participants = Table(
+    "conversation_participants",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("conversation_id", Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("joined_at", DateTime, nullable=False),
+    Column("last_read_at", DateTime, nullable=True),
+    UniqueConstraint("conversation_id", "user_id", name="uq_conversation_participant"),
+)
+
+messages = Table(
+    "messages",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("conversation_id", Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False),
+    Column("sender_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("body", String, nullable=False),
+    Column("created_at", DateTime, nullable=False, index=True),
+)

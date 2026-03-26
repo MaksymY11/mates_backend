@@ -12,6 +12,8 @@ from app.models import (
     house_rule_votes,
     quick_pick_sessions,
     preference_profiles,
+    conversations,
+    conversation_participants,
 )
 from app.deps import get_current_user
 from datetime import datetime, timezone, timedelta
@@ -169,6 +171,24 @@ async def create_household(
         )
     )
 
+    # Auto-create group conversation for the household
+    conv_result = await db.execute(
+        insert(conversations).values(
+            type="group",
+            household_id=household_id,
+            created_at=now,
+        ).returning(conversations.c.id)
+    )
+    conv_id = conv_result.scalar_one()
+    await db.execute(
+        insert(conversation_participants).values(
+            conversation_id=conv_id,
+            user_id=me,
+            joined_at=now,
+            last_read_at=None,
+        )
+    )
+
     await db.commit()
     return {"id": household_id, "name": name}
 
@@ -244,11 +264,22 @@ async def get_my_household(
             "created_at": r.created_at.isoformat() if r.created_at else None,
         })
 
+    # Get group conversation ID for this household
+    result = await db.execute(
+        select(conversations.c.id).where(
+            conversations.c.household_id == hid,
+            conversations.c.type == "group",
+        )
+    )
+    conv_row = result.fetchone()
+    conversation_id = conv_row.id if conv_row else None
+
     return {
         "household": {
             "id": h.id,
             "name": h.name,
             "created_by": h.created_by,
+            "conversation_id": conversation_id,
             "members": members,
             "rules": rules,
         }
@@ -297,6 +328,22 @@ async def leave_household(
             household_invites.c.status == "pending",
         )
     )
+
+    # Remove from group conversation
+    result = await db.execute(
+        select(conversations.c.id).where(
+            conversations.c.household_id == hid,
+            conversations.c.type == "group",
+        )
+    )
+    conv_row = result.fetchone()
+    if conv_row:
+        await db.execute(
+            delete(conversation_participants).where(
+                conversation_participants.c.conversation_id == conv_row.id,
+                conversation_participants.c.user_id == me,
+            )
+        )
 
     await db.commit()
     return {"detail": "Left household"}
@@ -504,6 +551,24 @@ async def accept_invite(
     except IntegrityError:
         await db.rollback()
         raise HTTPException(status_code=409, detail="Already in a household")
+
+    # Add to group conversation
+    result = await db.execute(
+        select(conversations.c.id).where(
+            conversations.c.household_id == invite.household_id,
+            conversations.c.type == "group",
+        )
+    )
+    conv_row = result.fetchone()
+    if conv_row:
+        await db.execute(
+            insert(conversation_participants).values(
+                conversation_id=conv_row.id,
+                user_id=me,
+                joined_at=now,
+                last_read_at=None,
+            )
+        )
 
     # Delete this invite and all other pending invites for this user
     await db.execute(
