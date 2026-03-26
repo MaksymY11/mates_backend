@@ -13,9 +13,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from sqlalchemy import insert, delete
+from sqlalchemy import insert, delete, select, func
 from app.database import engine
-from app.models import quick_pick_questions
+from app.models import quick_pick_questions, quick_pick_sessions
 
 QUESTIONS: list[dict] = [
     # ─── CLEANLINESS ─────────────────────────────────────────────
@@ -140,6 +140,15 @@ QUESTIONS: list[dict] = [
 
 async def seed():
     async with engine.begin() as conn:
+        # Guard: don't delete questions if active sessions reference them
+        result = await conn.execute(
+            select(func.count()).select_from(quick_pick_sessions)
+        )
+        session_count = result.scalar() or 0
+        if session_count > 0:
+            print(f"Warning: {session_count} active session(s) exist. Deleting sessions + answers first to avoid orphaned question IDs.")
+            await conn.execute(delete(quick_pick_sessions))
+
         # Clear existing questions (idempotent)
         await conn.execute(delete(quick_pick_questions))
 

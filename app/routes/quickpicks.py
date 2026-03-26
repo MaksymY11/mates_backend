@@ -1,6 +1,7 @@
 from fastapi import Depends, APIRouter, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, insert, delete, func, or_, and_
+from sqlalchemy import select, insert, delete, func, or_, and_, update
+from sqlalchemy.exc import IntegrityError
 from app.database import get_db
 from app.models import (
     users,
@@ -78,17 +79,27 @@ async def _create_session(db: AsyncSession, user_a_id: int, user_b_id: int) -> i
             selected_ids.append(q.id)
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    result = await db.execute(
-        insert(quick_pick_sessions).values(
-            user_a_id=a,
-            user_b_id=b,
-            status="pending_both",
-            questions=selected_ids,
-            created_at=now,
-        ).returning(quick_pick_sessions.c.id)
-    )
-    session_id = result.scalar_one()
-    await db.commit()
+    try:
+        result = await db.execute(
+            insert(quick_pick_sessions).values(
+                user_a_id=a,
+                user_b_id=b,
+                status="pending_both",
+                questions=selected_ids,
+                created_at=now,
+            ).returning(quick_pick_sessions.c.id)
+        )
+        session_id = result.scalar_one()
+    except IntegrityError:
+        # Race condition: other request created the session first — fetch it
+        await db.rollback()
+        result = await db.execute(
+            select(quick_pick_sessions.c.id).where(
+                quick_pick_sessions.c.user_a_id == a,
+                quick_pick_sessions.c.user_b_id == b,
+            )
+        )
+        session_id = result.scalar_one()
     return session_id
 
 
@@ -174,7 +185,6 @@ async def express_interest(
             created_at=now,
         )
     )
-    await db.commit()
 
     # Check for reciprocal interest
     result = await db.execute(
@@ -185,8 +195,10 @@ async def express_interest(
     )
     if result.fetchone():
         session_id = await _create_session(db, me, user_id)
+        await db.commit()
         return {"mutual": True, "session_id": session_id}
 
+    await db.commit()
     return {"mutual": False, "session_id": None}
 
 
@@ -342,14 +354,15 @@ async def get_session(
     if not session:
         raise HTTPException(status_code=404, detail="No Quick Picks session found")
 
-    # Fetch the actual question objects
+    # Fetch the actual question objects in one query
     question_ids = session.questions or []
+    result = await db.execute(
+        select(quick_pick_questions).where(quick_pick_questions.c.id.in_(question_ids))
+    )
+    q_by_id = {q.id: q for q in result.fetchall()}
     questions_data = []
     for qid in question_ids:
-        result = await db.execute(
-            select(quick_pick_questions).where(quick_pick_questions.c.id == qid)
-        )
-        q = result.fetchone()
+        q = q_by_id.get(qid)
         if q:
             questions_data.append({
                 "id": q.id,
@@ -470,7 +483,6 @@ async def submit_answer(
             else:
                 new_status = "pending_a"
 
-        from sqlalchemy import update
         await db.execute(
             update(quick_pick_sessions)
             .where(quick_pick_sessions.c.id == session_id)
@@ -512,7 +524,6 @@ async def get_results(
     viewed_by = list(session.results_viewed_by or [])
     if me not in viewed_by:
         viewed_by.append(me)
-        from sqlalchemy import update
         await db.execute(
             update(quick_pick_sessions)
             .where(quick_pick_sessions.c.id == session_id)
@@ -522,21 +533,19 @@ async def get_results(
 
     other_id = session.user_b_id if me == session.user_a_id else session.user_a_id
 
-    # Fetch questions
+    # Fetch questions in one query
     question_ids = session.questions or []
+    result = await db.execute(
+        select(quick_pick_questions).where(quick_pick_questions.c.id.in_(question_ids))
+    )
     questions_map: dict[int, dict] = {}
-    for qid in question_ids:
-        result = await db.execute(
-            select(quick_pick_questions).where(quick_pick_questions.c.id == qid)
-        )
-        q = result.fetchone()
-        if q:
-            questions_map[q.id] = {
-                "prompt": q.prompt,
-                "option_a": q.option_a,
-                "option_b": q.option_b,
-                "category": q.category,
-            }
+    for q in result.fetchall():
+        questions_map[q.id] = {
+            "prompt": q.prompt,
+            "option_a": q.option_a,
+            "option_b": q.option_b,
+            "category": q.category,
+        }
 
     # Fetch all answers for both users
     result = await db.execute(
