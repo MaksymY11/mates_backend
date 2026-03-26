@@ -12,6 +12,7 @@ from app.routes import vibe  # APIRouter with /vibe/* endpoints
 from app.routes import scenarios  # APIRouter with /scenarios/* endpoints
 from app.routes import discovery  # APIRouter with /discovery/* endpoints
 from app.routes import quickpicks  # APIRouter with /interest/* + /quickpicks/* endpoints
+from app.routes import households  # APIRouter with /households/* endpoints
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -40,6 +41,7 @@ app.include_router(vibe.router)
 app.include_router(scenarios.router)
 app.include_router(discovery.router)
 app.include_router(quickpicks.router)
+app.include_router(households.router)
 
 # Ensure static directory exists before mounting
 Path("static").mkdir(parents=True, exist_ok=True)

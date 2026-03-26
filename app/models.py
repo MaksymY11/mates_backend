@@ -178,3 +178,56 @@ quick_pick_answers = Table(
     Column("answered_at", DateTime, nullable=False),
     UniqueConstraint("session_id", "user_id", "question_index", name="uq_quickpick_answer"),
 )
+
+households = Table(
+    "households",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("name", String, nullable=False),
+    Column("created_by", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("created_at", DateTime, nullable=False),
+    Column("updated_at", DateTime, nullable=False),
+)
+
+household_members = Table(
+    "household_members",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("household_id", Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=False),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False),
+    Column("role", String, nullable=False),
+    Column("joined_at", DateTime, nullable=False),
+)
+
+household_invites = Table(
+    "household_invites",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("household_id", Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=False),
+    Column("inviter_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("invitee_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("status", String, nullable=False, server_default="pending"),
+    Column("created_at", DateTime, nullable=False),
+    UniqueConstraint("household_id", "invitee_id", name="uq_household_invitee"),
+)
+
+house_rules = Table(
+    "house_rules",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("household_id", Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=False),
+    Column("text", String, nullable=False),
+    Column("proposed_by", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("status", String, nullable=False, server_default="proposed"),
+    Column("created_at", DateTime, nullable=False),
+)
+
+house_rule_votes = Table(
+    "house_rule_votes",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("rule_id", Integer, ForeignKey("house_rules.id", ondelete="CASCADE"), nullable=False),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("vote", Boolean, nullable=False),
+    UniqueConstraint("rule_id", "user_id", name="uq_rule_user_vote"),
+)
