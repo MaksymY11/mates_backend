@@ -1,15 +1,93 @@
-# Mates Backend — FastAPI REST API
+# Mates Backend
 
-Backend for the Mates roommate-matching app.
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Neon-4169E1?logo=postgresql&logoColor=white)
+![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0_async-D71F00)
+![WebSocket](https://img.shields.io/badge/WebSocket-real--time-010101)
+![Render](https://img.shields.io/badge/Deployed_on-Render-46E3B7?logo=render&logoColor=white)
 
-> **License:** This project is source-available. See [LICENSE](LICENSE) for terms.
+Backend for Mates, a roommate-matching app built for college students. Instead of swiping or ranking, Mates groups users into neighborhoods based on how they furnish a virtual apartment, then lets them form households through shared activities and conversation.
 
-- **Framework:** FastAPI
-- **Database:** PostgreSQL (Neon) via SQLAlchemy async + asyncpg
-- **Auth:** JWT access tokens + HTTP-only refresh token cookies
-- **Storage:** Local static file serving for avatars (Pillow validation + thumbnail generation)
-- **Migrations:** Alembic
-- **Deployed on:** Render
+> **License:** Source-available. See [LICENSE](LICENSE) for terms.
+
+---
+
+## Tech Stack
+
+- **FastAPI** with async request handling
+- **PostgreSQL** (Neon) via SQLAlchemy 2.0 async + asyncpg
+- **Alembic** for database migrations
+- **WebSocket** for real-time messaging (via Starlette)
+- **JWT** two-token auth with HTTP-only refresh cookies
+- **Pillow** for avatar validation and thumbnail generation
+- **Pure Python** k-means clustering (no numpy dependency)
+
+---
+
+## Features
+
+<details>
+<summary><strong>Apartment System</strong> — virtual apartment as a personality questionnaire</summary>
+<br>
+
+Users build out a virtual apartment by placing furniture items from a seeded catalog. Each item carries hidden preference weights, so the apartment doubles as a personality questionnaire without feeling like one. Furniture is organized by zone (bedroom, kitchen, living room, bathroom) with constraint groups that prevent conflicting picks. Style presets let users furnish an entire zone in one action.
+</details>
+
+<details>
+<summary><strong>Vibe Engine</strong> — real-time preference profiling from apartment choices</summary>
+<br>
+
+Every time a user places or removes a furniture item, the vibe engine recalculates their preference profile. It sums the weights across all placed items, normalizes them, and maps the result to human-readable labels like "Night Owl" or "Social Butterfly." Recalculation happens atomically within the same database transaction as the item mutation, so the profile is always consistent.
+</details>
+
+<details>
+<summary><strong>Daily Scenarios</strong> — situational questions as profile conversation starters</summary>
+<br>
+
+Each day, users get a situational question ("Your roommate keeps leaving dishes in the sink...") with multiple-choice responses. These don't feed into the vibe engine. They exist purely as conversation starters that show up on profiles. Users can hold up to three active responses at a time; answering a fourth triggers a substitution flow where they pick which old answer to retire. Retired responses are soft-deleted rather than removed, preserving history.
+</details>
+
+<details>
+<summary><strong>Discovery and Neighborhood Clustering</strong> — from-scratch k-means with lazy invalidation</summary>
+<br>
+
+A from-scratch k-means implementation clusters users into neighborhoods based on their normalized preference weights. Clustering runs lazily on a user's first Discovery visit, or when their assignment has gone stale (more than 24 hours old). Apartment mutations invalidate the user's neighborhood membership but don't trigger an immediate recluster, deferring the work to the next page load. A global asyncio lock with a double-check pattern prevents duplicate clustering runs during concurrent requests.
+
+Similarity scores between users are calculated using normalized Euclidean distance rather than centroid comparison, giving more meaningful neighbor rankings. Location filtering (same city, same state, or anywhere) is applied at query time as a post-filter, keeping the clustering itself location-agnostic.
+</details>
+
+<details>
+<summary><strong>Quick Picks</strong> — mutual interest detection and rapid-fire compatibility sessions</summary>
+<br>
+
+A mutual-interest system where users "wave" at each other. When both users have waved, the backend auto-generates a five-question rapid-fire session drawn from the seeded question pool. Session pairs are normalized (lower user ID always maps to `user_a`) so that A waving at B and B waving at A resolve to the same session row. Each user answers independently, and the session tracks completion status per side. Withdrawing interest performs a clean break, deleting both interest directions and the session.
+</details>
+
+<details>
+<summary><strong>Households</strong> — group formation with invites, roles, and majority-vote house rules</summary>
+<br>
+
+Groups of two to four users who form a shared living unit. Creating a household requires the members to have completed a Quick Picks session with each other, ensuring groups grow from genuine connections rather than cold invites. The system handles role management (creator role auto-transfers to the earliest-joined member if the creator leaves), invite expiration (seven-day TTL, cleaned on fetch), and collaborative house rules with majority-based voting. For two-member households, rules require unanimity; for three or four members, simple majority wins. Proposers auto-vote yes. Accepted rules can be challenged through a removal proposal that resets all votes and starts a fresh count.
+</details>
+
+<details>
+<summary><strong>Real-Time Messaging</strong> — WebSocket delivery with optimistic rendering and cursor pagination</summary>
+<br>
+
+WebSocket connections for live message delivery, typing indicators, and read receipts. The REST layer handles conversation creation, message history with cursor-based pagination (ordered by auto-increment ID to avoid clock skew), and read status tracking. DM creation requires a completed Quick Picks session. Household creation auto-generates a group conversation, and members are added or removed as they join or leave.
+
+The server skips echoing messages back to the sender since the frontend renders them optimistically on send. The in-process ConnectionManager maps user IDs to active sockets, suitable for single-server deployment.
+</details>
+
+---
+
+## Scale
+
+- **17 tables** across auth, apartments, preferences, scenarios, neighborhoods, interests, sessions, households, and messaging
+- **40+ endpoints** organized across 8 route modules
+- **~4,400 lines** of route logic, plus standalone engines for vibe calculation and clustering
+- **5 seed scripts** for populating furniture catalogs, scenario questions, trade-off prompts, and test users
 
 ---
 
@@ -17,220 +95,29 @@ Backend for the Mates roommate-matching app.
 
 ```
 app/
-├── __init__.py
-├── main.py          # FastAPI entry point, CORS, lifespan
-├── database.py      # Async SQLAlchemy engine and session factory
-├── models.py        # SQLAlchemy table definitions (users, refresh_tokens)
-├── schemas.py       # Pydantic schemas
-├── crud.py          # DB operations (legacy, routes use direct queries)
-├── security.py      # Password hashing
-├── auth.py          # JWT token creation and verification
+├── main.py              # FastAPI entry, CORS, lifespan
+├── models.py            # 17 SQLAlchemy table definitions
+├── schemas.py           # Pydantic request/response models
+├── database.py          # Async engine and session factory
+├── deps.py              # Shared auth dependencies
+├── auth.py              # JWT creation and verification
+├── security.py          # Password hashing (bcrypt)
+├── vibe_engine.py       # Weight summing, normalization, label mapping
+├── clustering.py        # Pure Python k-means (no numpy)
+├── seed_furniture.py    # Furniture catalog + style presets
+├── seed_scenarios.py    # 23 daily scenario questions
+├── seed_quickpicks.py   # 18 trade-off questions across 5 categories
+├── seed_users.py        # 12 test users with apartments + responses
 └── routes/
-    ├── __init__.py
-    └── users.py     # All API routes
+    ├── users.py         # Auth, profile, avatar upload
+    ├── apartments.py    # Apartment CRUD, furniture placement
+    ├── vibe.py          # Vibe profiles and comparison
+    ├── scenarios.py     # Daily scenarios, answers, comparison
+    ├── discovery.py     # Neighborhoods, neighbors, nearby exploration
+    ├── quickpicks.py    # Mutual interest, sessions, results
+    ├── households.py    # Group formation, invites, house rules, voting
+    └── messaging.py     # WebSocket + REST conversations
 
-alembic/             # Database migrations
-static/avatars/      # Uploaded avatar images (local)
-requirements.txt
-.env.example
+alembic/                 # Database migrations
+static/avatars/          # Uploaded images (local, ephemeral on Render)
 ```
-
----
-
-## Data Model
-
-### users
-
-| Column       | Type     | Notes                  |
-| ------------ | -------- | ---------------------- |
-| id           | Integer  | Primary key            |
-| email        | String   | Unique, indexed        |
-| password     | String   | bcrypt hash            |
-| avatar_url   | String   | URL to uploaded avatar |
-| name         | String   | Display name           |
-| age          | Integer  |                        |
-| state        | String   |                        |
-| city         | String   |                        |
-| budget       | Integer  | Monthly budget         |
-| move_in_date | DateTime |                        |
-| bio          | String   |                        |
-| lifestyle    | JSON     | Living habits          |
-| activities   | JSON     | Interests              |
-| prefs        | JSON     | Roommate preferences   |
-
-### refresh_tokens
-
-| Column     | Type     | Notes                |
-| ---------- | -------- | -------------------- |
-| token      | String   | Primary key, indexed |
-| user_email | String   | Indexed              |
-| expires_at | DateTime |                      |
-
----
-
-## API Endpoints
-
-### Auth
-
-| Method | Endpoint        | Auth   | Description                                       |
-| ------ | --------------- | ------ | ------------------------------------------------- |
-| POST   | `/registerUser` | No     | Register and auto-login, returns access token     |
-| POST   | `/loginUser`    | No     | Login, returns access token + sets refresh cookie |
-| POST   | `/refreshToken` | Cookie | Rotate refresh token, returns new access token    |
-| POST   | `/logout`       | Cookie | Invalidate refresh token, clear cookie            |
-
-### Profile
-
-| Method | Endpoint        | Auth   | Description                                 |
-| ------ | --------------- | ------ | ------------------------------------------- |
-| GET    | `/me`           | Bearer | Get current user profile (no password)      |
-| POST   | `/updateUser`   | Bearer | Update profile fields                       |
-| POST   | `/uploadAvatar` | Bearer | Upload avatar image (max 5MB, JPEG/PNG/GIF) |
-
-### Debug (only when `DEBUG=true`)
-
-| Method | Endpoint       | Auth   | Description                          |
-| ------ | -------------- | ------ | ------------------------------------ |
-| GET    | `/debug/users` | Bearer | List all users with hashed passwords |
-
----
-
-## Auth Flow
-
-### Registration
-
-```
-POST /registerUser → { access_token, token_type }
-                    + sets refresh_token HTTP-only cookie
-```
-
-### Login
-
-```
-POST /loginUser → { access_token, token_type }
-                + sets refresh_token HTTP-only cookie
-```
-
-### Authenticated requests
-
-```
-Authorization: Bearer <access_token>
-```
-
-### Token refresh
-
-```
-POST /refreshToken (sends refresh_token cookie automatically)
-→ { access_token, token_type } + rotated refresh_token cookie
-```
-
-### Logout
-
-```
-POST /logout → clears refresh_token cookie, invalidates token in DB
-```
-
-**Note:** Access tokens remain valid until expiry (default 30 min) even after logout. This is a known JWT tradeoff — the refresh token is immediately invalidated so no new access tokens can be issued.
-
----
-
-## Installation
-
-### 1. Clone and create virtualenv
-
-```bash
-git clone https://github.com/MaksymY11/mates_backend.git
-cd mates_backend
-python -m venv venv
-
-# Mac/Linux
-source venv/bin/activate
-
-# Windows
-venv\Scripts\activate
-```
-
-### 2. Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Set environment variables
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env`:
-
-```dotenv
-DATABASE_URL=postgresql://user:password@host.neon.tech/dbname?sslmode=require
-ASYNC_DATABASE_URL=postgresql+asyncpg://user:password@host.neon.tech/dbname?ssl=require
-JWT_SECRET=your-secret-key-here
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-REFRESH_TOKEN_EXPIRE_MINUTES=43200
-```
-
-### 4. Run migrations
-
-```bash
-alembic upgrade head
-```
-
-### 5. Start the server
-
-```bash
-uvicorn app.main:app --reload
-```
-
-Server: `http://127.0.0.1:8000`
-Swagger docs: `http://127.0.0.1:8000/docs`
-
----
-
-## Deployment (Render)
-
-**Start command:**
-
-```
-alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 10000
-```
-
-Alembic runs migrations automatically on every deploy before the server starts.
-
-**Required environment variables on Render:**
-
-- `DATABASE_URL` — PostgreSQL URL with `postgresql://` prefix (used by Alembic)
-- `ASYNC_DATABASE_URL` — same database with `postgresql+asyncpg://` prefix (used by app)
-- `JWT_SECRET` — secret key for signing JWT tokens
-- `ACCESS_TOKEN_EXPIRE_MINUTES` — access token lifetime in minutes
-- `REFRESH_TOKEN_EXPIRE_MINUTES` — refresh token lifetime in minutes
-- `BASE_URL` — public URL of the server (e.g. `https://mates-backend-dxma.onrender.com`) for building avatar URLs
-
----
-
-## Avatar Upload
-
-- Accepted formats: JPEG, PNG, GIF
-- Max file size: 5MB
-- Pillow validates actual image content (rejects spoofed file types)
-- A 200x200 thumbnail is generated alongside each upload
-- Previous avatar is automatically deleted when a new one is uploaded
-- Files served from `/static/avatars/`
-
-**Note:** Render's filesystem resets on each deploy. For production persistence, avatar storage should be migrated to an object store (S3 or similar).
-
----
-
-## Environment Variables Reference
-
-| Variable                       | Required | Description                             |
-| ------------------------------ | -------- | --------------------------------------- |
-| `DATABASE_URL`                 | Yes      | Sync PostgreSQL URL for Alembic         |
-| `ASYNC_DATABASE_URL`           | Yes      | Async PostgreSQL URL for app queries    |
-| `JWT_SECRET`                   | Yes      | JWT signing secret                      |
-| `ACCESS_TOKEN_EXPIRE_MINUTES`  | No       | Default: 30                             |
-| `REFRESH_TOKEN_EXPIRE_MINUTES` | No       | Default: 43200 (30 days)                |
-| `BASE_URL`                     | No       | Public server URL for avatar URLs       |
-| `DEBUG`                        | No       | Set to `true` to enable debug endpoints |
