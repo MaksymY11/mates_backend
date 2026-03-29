@@ -235,8 +235,8 @@ SCENARIOS: list[dict] = [
 ]
 
 
-async def seed():
-    async with engine.begin() as conn:
+async def seed(eng=engine):
+    async with eng.begin() as conn:
         # Clear existing scenarios (idempotent)
         await conn.execute(delete(scenarios))
 

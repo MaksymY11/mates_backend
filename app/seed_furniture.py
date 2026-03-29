@@ -266,8 +266,8 @@ PRESETS: list[dict] = [
 ]
 
 
-async def seed():
-    async with engine.begin() as conn:
+async def seed(eng=engine):
+    async with eng.begin() as conn:
         # Clear existing data (idempotent)
         await conn.execute(delete(room_style_presets))
         await conn.execute(delete(furniture_catalog))

@@ -138,8 +138,8 @@ QUESTIONS: list[dict] = [
 ]
 
 
-async def seed():
-    async with engine.begin() as conn:
+async def seed(eng=engine):
+    async with eng.begin() as conn:
         # Guard: don't delete questions if active sessions reference them
         result = await conn.execute(
             select(func.count()).select_from(quick_pick_sessions)

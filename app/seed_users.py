@@ -194,11 +194,11 @@ ARCHETYPES = [
 ]
 
 
-async def seed():
+async def seed(eng=engine):
     hashed = hash_password(PASSWORD)
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    async with engine.begin() as conn:
+    async with eng.begin() as conn:
         # Build furniture name→row lookup
         result = await conn.execute(select(furniture_catalog))
         furniture_rows = result.fetchall()
