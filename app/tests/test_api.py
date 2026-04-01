@@ -575,16 +575,184 @@ async def test_create_household_neg(client):
 @pytest.mark.asyncio
 async def test_messaging(client):
     print("--------------------------MESSAGING TESTS--------------------------")
-    print("1. POST Create a DM User A->B")
+    from sqlalchemy import insert as sa_insert
+    from app.models import messages as messages_table
+    from datetime import datetime, timezone, timedelta
+
+    # ── DM Creation ──
+    print("1. POST Create DM A->B")
     response = await client.post(f"/conversations/dm/{state['user_idB']}", headers=state["headers_A"])
     assert response.status_code == 200
+    data = response.json()
+    assert data["created"] == True
+    state["dm_conv_id"] = data["conversation_id"]
 
-    print("2. GET DMs User A")
+    print("2. POST Create DM A->B again (idempotent — same conv returned)")
+    response = await client.post(f"/conversations/dm/{state['user_idB']}", headers=state["headers_A"])
+    assert response.status_code == 200
+    data = response.json()
+    assert data["created"] == False
+    assert data["conversation_id"] == state["dm_conv_id"]
+
+    print("3. POST Create DM B->A (same pair — same conv returned)")
+    response = await client.post(f"/conversations/dm/{state['user_idA']}", headers=state["headers_B"])
+    assert response.status_code == 200
+    data = response.json()
+    assert data["created"] == False
+    assert data["conversation_id"] == state["dm_conv_id"]
+
+    # ── DM Negative Cases ──
+    print("4. Negative: Self-DM should return 400")
+    response = await client.post(f"/conversations/dm/{state['user_idA']}", headers=state["headers_A"])
+    assert response.status_code == 400
+
+    print("5. Register User C (no Quick Picks with A)")
+    response = await client.post("/registerUser", json={
+        "email": "charlie@test.com",
+        "password": "TestPass123"
+    })
+    assert response.status_code == 200
+    state["token_C"] = response.json()["access_token"]
+    state["headers_C"] = {"Authorization": f"Bearer {state['token_C']}"}
+    response = await client.post("/updateUser", headers=state["headers_C"], json={
+        "name": "Charlie", "city": "Austin", "state": "TX"
+    })
+    assert response.status_code == 200
+    response = await client.get("/me", headers=state["headers_C"])
+    state["user_idC"] = response.json()["id"]
+
+    print("6. Negative: DM without completed Quick Picks should return 400")
+    response = await client.post(f"/conversations/dm/{state['user_idC']}", headers=state["headers_A"])
+    assert response.status_code == 400
+
+    print("7. Negative: DM to nonexistent user should return 404")
+    response = await client.post("/conversations/dm/99999", headers=state["headers_A"])
+    assert response.status_code == 404
+
+    # ── List Conversations ──
+    print("8. GET Conversations User A (should have DM + group from household)")
     response = await client.get("/conversations", headers=state["headers_A"])
     assert response.status_code == 200
-    state["conv_id"] = response.json()["conversations"][0]["id"]
+    convos = response.json()["conversations"]
+    conv_types = [c["type"] for c in convos]
+    assert "dm" in conv_types
+    assert "group" in conv_types
+    state["group_conv_id"] = next(c["id"] for c in convos if c["type"] == "group")
 
-    print("3. GET DMs User B")
+    print("9. GET Conversations User B (should also have DM + group)")
     response = await client.get("/conversations", headers=state["headers_B"])
     assert response.status_code == 200
-    assert response.json()["conversations"][0]["id"] == state["conv_id"]
+    assert len(response.json()["conversations"]) == 2
+
+    print("10. GET Conversations User C (should be empty)")
+    response = await client.get("/conversations", headers=state["headers_C"])
+    assert response.status_code == 200
+    assert response.json()["conversations"] == []
+
+    # ── Empty Messages ──
+    print("11. GET Messages from DM (should be empty)")
+    response = await client.get(f"/conversations/{state['dm_conv_id']}/messages", headers=state["headers_A"])
+    assert response.status_code == 200
+    assert response.json()["messages"] == []
+
+    print("12. Negative: Non-participant can't read messages")
+    response = await client.get(f"/conversations/{state['dm_conv_id']}/messages", headers=state["headers_C"])
+    assert response.status_code == 403
+
+    # ── Mark as Read ──
+    print("13. POST Mark DM as read User A")
+    response = await client.post(f"/conversations/{state['dm_conv_id']}/read", headers=state["headers_A"])
+    assert response.status_code == 200
+
+    print("14. Negative: Non-participant can't mark as read")
+    response = await client.post(f"/conversations/{state['dm_conv_id']}/read", headers=state["headers_C"])
+    assert response.status_code == 403
+
+    # ── Insert Messages Directly & Test Retrieval ──
+    print("15. Insert 5 messages into DM via TestSessionLocal")
+    # Offset message timestamps 10s in the past so mark_read (which uses now())
+    # is always after all messages — avoids millisecond race in back-to-back test calls
+    base_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=10)
+    msg_ids = []
+    async with TestSessionLocal() as db:
+        for i in range(5):
+            sender = state["user_idA"] if i % 2 == 0 else state["user_idB"]
+            result = await db.execute(
+                sa_insert(messages_table).values(
+                    conversation_id=state["dm_conv_id"],
+                    sender_id=sender,
+                    body=f"Test message {i+1}",
+                    created_at=base_time + timedelta(seconds=i),
+                ).returning(messages_table.c.id)
+            )
+            msg_ids.append(result.scalar_one())
+        await db.commit()
+
+    print("16. GET Messages — should return all 5 in ASC order")
+    response = await client.get(f"/conversations/{state['dm_conv_id']}/messages", headers=state["headers_A"])
+    assert response.status_code == 200
+    msgs = response.json()["messages"]
+    assert len(msgs) == 5
+    assert msgs[0]["body"] == "Test message 1"
+    assert msgs[4]["body"] == "Test message 5"
+    assert msgs[0]["sender_name"] == "Maksym"
+    assert msgs[1]["sender_name"] == "Angelika"
+
+    print("17. GET Messages with cursor pagination (?before=msg3 should return msg1, msg2)")
+    response = await client.get(
+        f"/conversations/{state['dm_conv_id']}/messages?before={msg_ids[2]}",
+        headers=state["headers_A"]
+    )
+    assert response.status_code == 200
+    msgs = response.json()["messages"]
+    assert len(msgs) == 2
+    assert msgs[0]["body"] == "Test message 1"
+    assert msgs[1]["body"] == "Test message 2"
+
+    print("18. GET Messages with limit=2 (should return last 2 in ASC)")
+    response = await client.get(
+        f"/conversations/{state['dm_conv_id']}/messages?limit=2",
+        headers=state["headers_A"]
+    )
+    assert response.status_code == 200
+    msgs = response.json()["messages"]
+    assert len(msgs) == 2
+    assert msgs[0]["body"] == "Test message 4"
+    assert msgs[1]["body"] == "Test message 5"
+
+    # ── Unread Counts ──
+    print("19. GET Conversations User B — should have unread messages from A")
+    response = await client.get("/conversations", headers=state["headers_B"])
+    assert response.status_code == 200
+    dm = next(c for c in response.json()["conversations"] if c["type"] == "dm")
+    assert dm["unread_count"] > 0  # B hasn't read any messages
+
+    print("20. POST Mark as read User B, then verify unread = 0")
+    response = await client.post(f"/conversations/{state['dm_conv_id']}/read", headers=state["headers_B"])
+    assert response.status_code == 200
+    response = await client.get("/conversations", headers=state["headers_B"])
+    dm = next(c for c in response.json()["conversations"] if c["type"] == "dm")
+    assert dm["unread_count"] == 0
+
+    # ── Group Chat (from household) ──
+    print("21. GET Group chat messages (accessible by A)")
+    response = await client.get(f"/conversations/{state['group_conv_id']}/messages", headers=state["headers_A"])
+    assert response.status_code == 200
+
+    print("22. GET Group chat messages (accessible by B)")
+    response = await client.get(f"/conversations/{state['group_conv_id']}/messages", headers=state["headers_B"])
+    assert response.status_code == 200
+
+    print("23. Negative: User C can't access group chat")
+    response = await client.get(f"/conversations/{state['group_conv_id']}/messages", headers=state["headers_C"])
+    assert response.status_code == 403
+
+    # ── Conversation Participants ──
+    print("24. DM participants should be A and B")
+    response = await client.get("/conversations", headers=state["headers_A"])
+    dm = next(c for c in response.json()["conversations"] if c["type"] == "dm")
+    participant_ids = sorted([p["id"] for p in dm["participants"]])
+    assert participant_ids == sorted([state["user_idA"], state["user_idB"]])
+
+    print("25. Last message in conversation list should be 'Test message 5'")
+    assert dm["last_message"]["body"] == "Test message 5"
