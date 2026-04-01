@@ -60,21 +60,17 @@ async def _get_user_location(db: AsyncSession, user_id: int) -> dict:
 
 
 def _location_matches(my_loc: dict, their_city: str | None, their_state: str | None) -> bool:
-    """Check if another user matches the current user's location preference."""
+    """Check if another user matches the current user's location preference.
+    Comparisons are case-insensitive to handle varied user input."""
     pref = my_loc.get("location_preference", "same_city")
     if pref == "anywhere":
         return True
     if pref == "same_state":
-        return (
-            my_loc.get("state") is not None
-            and my_loc.get("state") == their_state
-        )
+        return my_loc["state"].lower() == their_state.lower()
     # same_city (default)
     return (
-        my_loc.get("city") is not None
-        and my_loc.get("state") is not None
-        and my_loc.get("city") == their_city
-        and my_loc.get("state") == their_state
+        my_loc["city"].lower() == their_city.lower()
+        and my_loc["state"].lower() == their_state.lower()
     )
 
 
