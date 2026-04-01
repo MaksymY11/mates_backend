@@ -12,6 +12,7 @@ from app.models import (
     preference_profiles,
 )
 from app.deps import get_current_user
+from app.notifications import create_notification
 from datetime import datetime, timezone
 import random
 
@@ -196,8 +197,38 @@ async def express_interest(
     if result.fetchone():
         session_id = await _create_session(db, me, user_id)
         await db.commit()
+
+        # Notify both users: match_unlocked (supersedes wave_received)
+        r1 = await db.execute(select(users.c.name).where(users.c.id == me))
+        my_name = r1.scalar()
+        r2 = await db.execute(select(users.c.name).where(users.c.id == user_id))
+        other_name = r2.scalar()
+        await create_notification(
+            db, user_id, "match_unlocked", me,
+            f"It's a match! Quick Picks unlocked with {my_name}",
+            "Answer 5 quick questions to see how compatible you are",
+            {"user_id": me},
+        )
+        await create_notification(
+            db, me, "match_unlocked", user_id,
+            f"It's a match! Quick Picks unlocked with {other_name}",
+            "Answer 5 quick questions to see how compatible you are",
+            {"user_id": user_id},
+        )
+        await db.commit()
         return {"mutual": True, "session_id": session_id}
 
+    await db.commit()
+
+    # Notify target: wave_received
+    r = await db.execute(select(users.c.name).where(users.c.id == me))
+    my_name = r.scalar()
+    await create_notification(
+        db, user_id, "wave_received", me,
+        f"{my_name} waved at you!",
+        "Tap to check out their apartment",
+        {"user_id": me},
+    )
     await db.commit()
     return {"mutual": False, "session_id": None}
 
@@ -488,6 +519,17 @@ async def submit_answer(
             .where(quick_pick_sessions.c.id == session_id)
             .values(status=new_status)
         )
+
+        # Notify the other user when session completes
+        if new_status == "completed":
+            r = await db.execute(select(users.c.name).where(users.c.id == me))
+            my_name = r.scalar()
+            await create_notification(
+                db, other_id, "quickpicks_completed", me,
+                f"Quick Picks results ready with {my_name}!",
+                "See how your answers compare",
+                {"session_id": session_id, "user_id": me},
+            )
 
     await db.commit()
     return {"detail": "Answer recorded", "answers_submitted": my_count}

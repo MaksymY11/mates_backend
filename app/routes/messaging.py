@@ -8,9 +8,11 @@ from app.models import (
     conversation_participants,
     messages,
     quick_pick_sessions,
+    notifications,
 )
 from app.deps import get_current_user
 from app.auth import verify_access_token
+from app.notifications import create_notification
 from datetime import datetime, timezone
 import json
 
@@ -158,6 +160,7 @@ async def _handle_ws_message(sender_id: int, data: dict):
         sender = result.fetchone()
 
     # Fan out to all participants
+    sender_name = sender.name if sender else None
     outgoing = {
         "type": "message",
         "conversation_id": conv_id,
@@ -165,7 +168,7 @@ async def _handle_ws_message(sender_id: int, data: dict):
             "id": msg_row.id,
             "conversation_id": conv_id,
             "sender_id": sender_id,
-            "sender_name": sender.name if sender else None,
+            "sender_name": sender_name,
             "sender_avatar_url": sender.avatar_url if sender else None,
             "body": body,
             "created_at": msg_row.created_at.isoformat(),
@@ -174,6 +177,79 @@ async def _handle_ws_message(sender_id: int, data: dict):
     for uid in participant_ids:
         if uid != sender_id:
             await manager.send_to_user(uid, outgoing)
+
+    # Notify all non-sender participants — upsert per conversation
+    preview = body[:100]
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    async with AssyncSessionLocal() as notify_db:
+        result = await notify_db.execute(
+            select(conversations.c.type, conversations.c.household_id)
+            .where(conversations.c.id == conv_id)
+        )
+        conv = result.fetchone()
+
+        for uid in participant_ids:
+            if uid != sender_id:
+                if conv and conv.type == "group":
+                    from app.models import households as households_table
+                    result = await notify_db.execute(
+                        select(households_table.c.name)
+                        .where(households_table.c.id == conv.household_id)
+                    )
+                    h_name = result.scalar()
+                    event_type = "new_group_message"
+                    title = f"{sender_name} in {h_name}: {preview}"
+                else:
+                    event_type = "new_dm_message"
+                    title = f"New message from {sender_name}"
+
+                # Upsert: find existing message notification for this conversation
+                result = await notify_db.execute(
+                    select(notifications.c.id).where(
+                        notifications.c.user_id == uid,
+                        notifications.c.event_type.in_(["new_dm_message", "new_group_message"]),
+                        notifications.c.data["conversation_id"].as_integer() == conv_id,
+                    )
+                )
+                existing = result.fetchone()
+
+                if existing:
+                    await notify_db.execute(
+                        update(notifications)
+                        .where(notifications.c.id == existing.id)
+                        .values(
+                            event_type=event_type,
+                            title=title,
+                            body=preview,
+                            actor_id=sender_id,
+                            read=False,
+                            created_at=now,
+                        )
+                    )
+                    await notify_db.commit()
+                    # Push via WebSocket
+                    try:
+                        await manager.send_to_user(uid, {
+                            "type": "notification",
+                            "notification": {
+                                "id": existing.id,
+                                "event_type": event_type,
+                                "actor_id": sender_id,
+                                "title": title,
+                                "body": preview,
+                                "data": {"conversation_id": conv_id, "user_id": sender_id},
+                                "created_at": now.isoformat(),
+                            },
+                        })
+                    except Exception:
+                        pass
+                else:
+                    await create_notification(
+                        notify_db, uid, event_type, sender_id,
+                        title, preview,
+                        {"conversation_id": conv_id, "user_id": sender_id},
+                    )
+                    await notify_db.commit()
 
 
 async def _handle_ws_typing(sender_id: int, data: dict):

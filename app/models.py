@@ -1,4 +1,5 @@
 from sqlalchemy import JSON, Boolean, Date, Table, Column, Integer, String, Float, DateTime, MetaData, ForeignKey, UniqueConstraint
+from datetime import datetime
 
 metadata = MetaData()
 
@@ -260,4 +261,18 @@ messages = Table(
     Column("sender_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
     Column("body", String, nullable=False),
     Column("created_at", DateTime, nullable=False, index=True),
+)
+
+notifications = Table(
+    "notifications",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
+    Column("event_type", String, nullable=False),
+    Column("actor_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True),
+    Column("title", String, nullable=False),
+    Column("body", String, nullable=False),
+    Column("data", JSON, nullable=True),
+    Column("read", Boolean, default=False, server_default="false"),
+    Column("created_at", DateTime, default=datetime.utcnow, index=True),
 )

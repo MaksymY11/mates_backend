@@ -16,6 +16,7 @@ from app.models import (
     conversation_participants,
 )
 from app.deps import get_current_user
+from app.notifications import create_notification
 from datetime import datetime, timezone, timedelta
 
 router = APIRouter(tags=["households"])
@@ -88,13 +89,15 @@ async def _user_info(db: AsyncSession, user_id: int) -> dict:
     }
 
 
-async def _resolve_rule(db: AsyncSession, household_id: int, member_count: int, rule_id: int):
-    """After a vote, check if a rule should be auto-resolved."""
+async def _resolve_rule(db: AsyncSession, household_id: int, member_count: int, rule_id: int) -> str | None:
+    """After a vote, check if a rule should be auto-resolved. Returns new status or None."""
     # Get current rule status to determine resolution semantics
     result = await db.execute(
-        select(house_rules.c.status).where(house_rules.c.id == rule_id)
+        select(house_rules.c.status, house_rules.c.text).where(house_rules.c.id == rule_id)
     )
-    current_status = result.scalar()
+    rule_row = result.fetchone()
+    current_status = rule_row.status
+    rule_text = rule_row.text
 
     result = await db.execute(
         select(
@@ -130,6 +133,22 @@ async def _resolve_rule(db: AsyncSession, household_id: int, member_count: int, 
             .where(house_rules.c.id == rule_id)
             .values(status=new_status)
         )
+
+        # Notify all household members: rule_resolved
+        result = await db.execute(
+            select(household_members.c.user_id)
+            .where(household_members.c.household_id == household_id)
+        )
+        member_ids = [r.user_id for r in result.fetchall()]
+        for uid in member_ids:
+            await create_notification(
+                db, uid, "rule_resolved", None,
+                f"Rule {new_status}: {rule_text}",
+                "House rule vote completed",
+                {"household_id": household_id, "rule_id": rule_id},
+            )
+
+    return new_status
 
 
 # ── Household CRUD ───────────────────────────────────────────────
@@ -433,6 +452,19 @@ async def invite_user(
         await db.rollback()
         raise HTTPException(status_code=409, detail="Invite already exists")
 
+    # Get household name and actor name for notification
+    result = await db.execute(select(households.c.name).where(households.c.id == hid))
+    h_name = result.scalar()
+    result = await db.execute(select(users.c.name).where(users.c.id == me))
+    my_name = result.scalar()
+
+    await create_notification(
+        db, user_id, "household_invite", me,
+        f"{my_name} invited you to join {h_name}",
+        "Tap to view the invite",
+        {"household_id": hid},
+    )
+
     await db.commit()
     return {"detail": "Invite sent"}
 
@@ -578,6 +610,22 @@ async def accept_invite(
         )
     )
 
+    # Notify existing members (not the joiner)
+    result = await db.execute(select(users.c.name).where(users.c.id == me))
+    joiner_name = result.scalar()
+    result = await db.execute(
+        select(household_members.c.user_id)
+        .where(household_members.c.household_id == invite.household_id)
+    )
+    for row in result.fetchall():
+        if row.user_id != me:
+            await create_notification(
+                db, row.user_id, "household_member_joined", me,
+                f"{joiner_name} joined your household!",
+                "Your household is growing",
+                {"household_id": invite.household_id},
+            )
+
     await db.commit()
     return {"detail": "Joined household"}
 
@@ -707,6 +755,22 @@ async def propose_rule(
         )
     )
 
+    # Notify other members: rule_proposed
+    result = await db.execute(select(users.c.name).where(users.c.id == me))
+    my_name = result.scalar()
+    result = await db.execute(
+        select(household_members.c.user_id)
+        .where(household_members.c.household_id == household_id)
+    )
+    for row in result.fetchall():
+        if row.user_id != me:
+            await create_notification(
+                db, row.user_id, "rule_proposed", me,
+                f"{my_name} proposed: {text}",
+                "Vote on this house rule",
+                {"household_id": household_id, "rule_id": rule_id},
+            )
+
     # Check if proposer's vote triggers majority (e.g. 2 of 3 members)
     count = await _member_count(db, household_id)
     await _resolve_rule(db, household_id, count, rule_id)
@@ -825,6 +889,22 @@ async def propose_rule_removal(
             vote=True,
         )
     )
+
+    # Notify other members: removal_proposed
+    result = await db.execute(select(users.c.name).where(users.c.id == me))
+    my_name = result.scalar()
+    result = await db.execute(
+        select(household_members.c.user_id)
+        .where(household_members.c.household_id == rule.household_id)
+    )
+    for row in result.fetchall():
+        if row.user_id != me:
+            await create_notification(
+                db, row.user_id, "removal_proposed", me,
+                f"{my_name} proposes removing: {rule.text}",
+                "Vote on whether to keep this rule",
+                {"household_id": rule.household_id, "rule_id": rule_id},
+            )
 
     # Auto-resolve in case proposer's vote is enough
     count = await _member_count(db, rule.household_id)

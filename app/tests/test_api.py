@@ -756,3 +756,99 @@ async def test_messaging(client):
 
     print("25. Last message in conversation list should be 'Test message 5'")
     assert dm["last_message"]["body"] == "Test message 5"
+
+
+@pytest.mark.asyncio
+async def test_notifications(client):
+    print("--------------------------NOTIFICATIONS TESTS--------------------------")
+
+    # By this point, previous tests created notifications:
+    # - A waved at B → wave_received to B (but mutual was detected → match_unlocked to both)
+    # - Quick Picks completed → quickpicks_completed to the other user
+    # - Household invite A→B → household_invite to B
+    # - B accepted invite → household_member_joined to A
+    # - A proposed rule → rule_proposed to B
+    # - B voted on rule → rule_resolved to both
+
+    print("1. GET Notifications User A")
+    response = await client.get("/notifications/", headers=state["headers_A"])
+    assert response.status_code == 200
+    data = response.json()
+    assert "notifications" in data
+    assert "unread_count" in data
+    notifs_A = data["notifications"]
+    assert len(notifs_A) > 0
+    state["unread_count_A"] = data["unread_count"]
+
+    # Verify notification structure
+    first = notifs_A[0]
+    assert "id" in first
+    assert "event_type" in first
+    assert "title" in first
+    assert "body" in first
+    assert "read" in first
+    assert "created_at" in first
+    assert first["read"] == False
+    state["notif_id_A"] = first["id"]
+
+    print("2. GET Notifications User B")
+    response = await client.get("/notifications/", headers=state["headers_B"])
+    assert response.status_code == 200
+    data = response.json()
+    notifs_B = data["notifications"]
+    assert len(notifs_B) > 0
+    state["notif_id_B"] = notifs_B[0]["id"]
+
+    # Verify actor info is joined
+    notif_with_actor = next((n for n in notifs_B if n["actor_id"] is not None), None)
+    assert notif_with_actor is not None
+    assert notif_with_actor["actor_name"] is not None
+
+    print("3. POST Mark single notification as read User A")
+    response = await client.post(f"/notifications/{state['notif_id_A']}/read", headers=state["headers_A"])
+    assert response.status_code == 200
+
+    # Verify it's marked as read
+    response = await client.get("/notifications/", headers=state["headers_A"])
+    data = response.json()
+    marked = next(n for n in data["notifications"] if n["id"] == state["notif_id_A"])
+    assert marked["read"] == True
+    assert data["unread_count"] == state["unread_count_A"] - 1
+
+    print("4. Negative: User B cannot mark User A's notification as read")
+    response = await client.post(f"/notifications/{state['notif_id_A']}/read", headers=state["headers_B"])
+    assert response.status_code == 404
+
+    print("5. POST Mark all read User B")
+    response = await client.post("/notifications/read-all", headers=state["headers_B"])
+    assert response.status_code == 200
+    response = await client.get("/notifications/", headers=state["headers_B"])
+    assert response.json()["unread_count"] == 0
+
+    print("6. DELETE Notification User A")
+    response = await client.delete(f"/notifications/{state['notif_id_A']}", headers=state["headers_A"])
+    assert response.status_code == 200
+    # Verify it's gone
+    response = await client.get("/notifications/", headers=state["headers_A"])
+    ids = [n["id"] for n in response.json()["notifications"]]
+    assert state["notif_id_A"] not in ids
+
+    print("7. Negative: User B cannot delete User A's notification")
+    # Pick a remaining notification from A
+    response = await client.get("/notifications/", headers=state["headers_A"])
+    remaining = response.json()["notifications"]
+    if len(remaining) > 0:
+        response = await client.delete(f"/notifications/{remaining[0]['id']}", headers=state["headers_B"])
+        assert response.status_code == 404
+
+    print("8. GET Notifications with pagination")
+    response = await client.get("/notifications/?limit=2&offset=0", headers=state["headers_A"])
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["notifications"]) <= 2
+
+    print("9. GET Notifications User C (should be empty)")
+    response = await client.get("/notifications/", headers=state["headers_C"])
+    assert response.status_code == 200
+    assert response.json()["notifications"] == []
+    assert response.json()["unread_count"] == 0
