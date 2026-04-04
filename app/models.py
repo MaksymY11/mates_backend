@@ -276,3 +276,13 @@ notifications = Table(
     Column("read", Boolean, default=False, server_default="false"),
     Column("created_at", DateTime, default=datetime.utcnow, index=True),
 )
+
+device_tokens = Table(
+    "device_tokens",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
+    Column("fcm_token", String, nullable=False, unique=True),
+    Column("platform", String, nullable=False),  # "android", "ios", "web"
+    Column("created_at", DateTime, nullable=False),
+)

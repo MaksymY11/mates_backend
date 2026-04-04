@@ -1,7 +1,9 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import insert
-from app.models import notifications
+from sqlalchemy import insert, select, delete
+from app.models import notifications, device_tokens
+from app.firebase import send_push
 from datetime import datetime, timezone
+import asyncio
 
 
 async def create_notification(
@@ -13,7 +15,10 @@ async def create_notification(
     body: str,
     data: dict | None = None,
 ):
-    """Insert a notification row and push it via WebSocket if the user is online."""
+    """Insert a notification row, push via WebSocket to online users,
+    and send FCM push notifications to all registered devices.
+    Stale FCM tokens are automatically cleaned up on send failure."""
+
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     result = await db.execute(
         insert(notifications).values(
@@ -48,3 +53,31 @@ async def create_notification(
         print(f"[NOTIF] Push sent successfully to user {user_id}")
     except Exception as e:
         print(f"[NOTIF] WebSocket push failed for user {user_id}: {e}")
+
+    # Push via FCM
+    try:
+        tokens_result = await db.execute(
+            select(device_tokens.c.fcm_token)
+            .where(device_tokens.c.user_id == user_id)
+        )
+
+        fcm_data = {
+            "event_type": event_type,
+            "notification_id": str(row.id),
+        }
+        if data:
+            fcm_data.update({k: str(v) for k, v in data.items()})
+
+        stale = []
+        for token in tokens_result:
+            success = await asyncio.to_thread(send_push, token.fcm_token, title, body, fcm_data)
+            if not success:
+                stale.append(token.fcm_token)
+
+        for token in stale:
+            await db.execute(
+                delete(device_tokens)
+                .where(device_tokens.c.fcm_token == token)
+            )
+    except Exception as e:
+        print(f"[NOTIF] FCM push failed for user {user_id}: {e}")

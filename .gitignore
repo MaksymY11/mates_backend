@@ -15,3 +15,6 @@ mates.db
 .idea/
 .vscode/
 .env
+
+# Firebase service account key
+firebase-service-account.json

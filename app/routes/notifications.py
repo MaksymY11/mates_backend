@@ -7,6 +7,7 @@ from app.deps import get_current_user
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
+# ── Helpers ──────────────────────────────────────────────────────
 
 async def _resolve_user_id(db: AsyncSession, payload: dict) -> int:
     email = payload["email"]
@@ -16,6 +17,7 @@ async def _resolve_user_id(db: AsyncSession, payload: dict) -> int:
         raise HTTPException(status_code=404, detail="User not found")
     return row.id
 
+# ── Notifications CRUD ─────────────────────────────────────────────
 
 @router.get("/")
 async def list_notifications(

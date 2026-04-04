@@ -15,6 +15,7 @@ from app.routes import quickpicks  # APIRouter with /interest/* + /quickpicks/* 
 from app.routes import households  # APIRouter with /households/* endpoints
 from app.routes import messaging  # APIRouter with /ws + /conversations/* endpoints
 from app.routes import notifications  # APIRouter with /notifications/* endpoints
+from app.routes import devices # APIRouter with /devices/* endpoints
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -46,6 +47,7 @@ app.include_router(quickpicks.router)
 app.include_router(households.router)
 app.include_router(messaging.router)
 app.include_router(notifications.router)
+app.include_router(devices.router)
 
 # Ensure static directory exists before mounting
 Path("static").mkdir(parents=True, exist_ok=True)
