@@ -19,11 +19,11 @@ def _ensure_init():
         print("[FIREBASE] Service account key not found — push notifications disabled")
 
 
-def send_push(token: str, title: str, body: str, data: dict | None = None) -> bool:
-    """Send a single FCM push notification. Returns True on success, False on failure."""
+def send_push(token: str, title: str, body: str, data: dict | None = None) -> bool | None:
+    """Send a single FCM push notification. Returns True on success, False if token is stale (should delete), None on transient error."""
     _ensure_init()
     if not _initialized:
-        return False
+        return None
     try:
         message = messaging.Message(
             notification=messaging.Notification(title=title, body=body),
@@ -36,4 +36,4 @@ def send_push(token: str, title: str, body: str, data: dict | None = None) -> bo
         return False
     except Exception as e:
         print(f"[FIREBASE] Push failed for token {token[:20]}...: {e}")
-        return False
+        return None

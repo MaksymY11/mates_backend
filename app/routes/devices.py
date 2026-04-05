@@ -65,19 +65,20 @@ async def register_device(
     await db.commit()
     return {"detail": "ok"}
 
-@router.post("/devices/unregister")
+@router.delete("/devices/unregister")
 async def unregister_device(
     body: dict,
     payload: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Remove an FCM device token. Called on logout to stop push notifications for this device."""
-
+    me = await _resolve_user_id(db,payload)
     fcm_token = body["fcm_token"]
 
     result = await db.execute(
         delete(device_tokens)
         .where(device_tokens.c.fcm_token == fcm_token)
+        .where(device_tokens.c.user_id == me)
     )
 
     await db.commit()

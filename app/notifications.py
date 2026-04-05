@@ -71,7 +71,7 @@ async def create_notification(
         stale = []
         for token in tokens_result:
             success = await asyncio.to_thread(send_push, token.fcm_token, title, body, fcm_data)
-            if not success:
+            if success is False:
                 stale.append(token.fcm_token)
 
         for token in stale:
