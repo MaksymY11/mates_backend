@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from app.database import get_db
 from app.models import users, refresh_tokens
 from app.security import hash_password, verify_password
+from app.limiter import limiter
 from app.deps import bearer_scheme, get_current_user
 from app.auth import (
     create_access_token,
@@ -32,9 +33,6 @@ if BASE_URL:
 else:
     AVATAR_URL_PREFIX = "/static/avatars"
 
-# Determine if debug endpoints should be available
-DEBUG_MODE = os.getenv("DEBUG", "false").lower() == "true"
-
 class UserRegister(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
@@ -46,7 +44,8 @@ class UserLogin(BaseModel):
 router = APIRouter()
 
 @router.post("/registerUser")
-async def register_user(user: UserRegister, response: Response, db: AsyncSession = Depends(get_db)):
+@limiter.limit("5/15minutes")
+async def register_user(request: Request, user: UserRegister, response: Response, db: AsyncSession = Depends(get_db)):
     # user.email and user.password (dot notation)
     hashed_password = hash_password(user.password)
     try:
@@ -84,7 +83,8 @@ async def register_user(user: UserRegister, response: Response, db: AsyncSession
     return {"access_token": access_token, "token_type": "bearer"}
 
 @router.post("/loginUser")
-async def login_user(user: UserLogin, response: Response, db: AsyncSession = Depends(get_db)):
+@limiter.limit("5/15minutes")
+async def login_user(request: Request, user: UserLogin, response: Response, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(users).where(users.c.email == user.email))
     db_user = result.fetchone()
     if not db_user or not verify_password(user.password, db_user.password):
@@ -116,6 +116,7 @@ async def login_user(user: UserLogin, response: Response, db: AsyncSession = Dep
     return {"access_token": access_token, "token_type": "bearer"}
 
 @router.post("/refreshToken")
+@limiter.limit("10/15minutes")
 async def refresh_token(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     r_token = request.cookies.get("refresh_token")
     if not r_token:
@@ -154,6 +155,7 @@ async def refresh_token(request: Request, response: Response, db: AsyncSession =
 
 
 @router.post("/logout")
+@limiter.limit("5/15minutes")
 async def logout(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     r_token = request.cookies.get("refresh_token")
     if r_token:
@@ -326,13 +328,3 @@ async def upload_avatar(
             await file.close()
         except Exception:
             pass
-
-if DEBUG_MODE:
-    @router.get("/debug/users")
-    async def debug_list_users(
-        payload: dict = Depends(get_current_user),
-        db: AsyncSession = Depends(get_db)
-    ):
-        result = await db.execute(select(users.c.id, users.c.email, users.c.password))
-        rows = result.fetchall()
-        return [dict(row._mapping) for row in rows]
