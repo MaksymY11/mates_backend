@@ -929,16 +929,17 @@ async def delete_rule(
     """Delete a rule (proposer or creator only)."""
     me = await _resolve_user_id(db, payload)
 
+    membership = await _get_user_household(db, me)
+    if not membership:
+        raise HTTPException(status_code=404, detail="Rule not found")
+
     result = await db.execute(
-        select(house_rules).where(house_rules.c.id == rule_id)
+        select(house_rules)
+        .where(house_rules.c.id == rule_id, house_rules.c.household_id == membership.household_id,)
     )
     rule = result.fetchone()
     if not rule:
         raise HTTPException(status_code=404, detail="Rule not found")
-
-    membership = await _get_user_household(db, me)
-    if not membership or membership.household_id != rule.household_id:
-        raise HTTPException(status_code=403, detail="Not a member of this household")
 
     if rule.proposed_by != me and membership.role != "creator":
         raise HTTPException(status_code=403, detail="Only the proposer or household creator can delete rules")

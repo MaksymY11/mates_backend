@@ -1,7 +1,7 @@
-from fastapi import Depends, APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Query
+from fastapi import Depends, APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, insert, update, func, or_, and_
-from app.database import get_db, AssyncSessionLocal
+from sqlalchemy import select, insert, update, func
+from app.database import get_db, AsyncSessionLocal
 from app.models import (
     users,
     conversations,
@@ -15,6 +15,7 @@ from app.auth import verify_access_token
 from app.notifications import create_notification
 from datetime import datetime, timezone
 import json
+import asyncio
 
 router = APIRouter(tags=["messaging"])
 
@@ -28,7 +29,6 @@ class ConnectionManager:
         self.active: dict[int, WebSocket] = {}
 
     async def connect(self, user_id: int, ws: WebSocket):
-        await ws.accept()
         # Replace previous connection for same user
         old = self.active.get(user_id)
         if old:
@@ -87,13 +87,26 @@ async def _get_participant_ids(db: AsyncSession, conversation_id: int) -> list[i
 # ── WebSocket Endpoint ──────────────────────────────────────────
 
 @router.websocket("/ws")
-async def websocket_endpoint(ws: WebSocket, token: str = Query(...)):
-    payload = verify_access_token(token)
+async def websocket_endpoint(ws: WebSocket):
+    await ws.accept()
+
+    # Wait for auth frame (5 sec timeout)
+    try:
+        raw = await asyncio.wait_for(ws.receive_text(), timeout = 5.0)
+        data = json.loads(raw)
+        if data.get("type") != "auth" or not data.get("token"):
+            await ws.close(code=4001)
+            return
+    except (asyncio.TimeoutError, json.JSONDecodeError, WebSocketDisconnect):
+        await ws.close(code=4001)
+        return
+    
+    payload = verify_access_token(data["token"])
     if not payload:
         await ws.close(code=4001)
         return
 
-    async with AssyncSessionLocal() as db:
+    async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(users.c.id).where(users.c.email == payload["email"])
         )
@@ -134,7 +147,7 @@ async def _handle_ws_message(sender_id: int, data: dict):
     if not conv_id or not body:
         return
 
-    async with AssyncSessionLocal() as db:
+    async with AsyncSessionLocal() as db:
         # Validate sender is a participant
         participant_ids = await _get_participant_ids(db, conv_id)
         if sender_id not in participant_ids:
@@ -181,7 +194,7 @@ async def _handle_ws_message(sender_id: int, data: dict):
     # Notify all non-sender participants — upsert per conversation
     preview = body[:100]
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    async with AssyncSessionLocal() as notify_db:
+    async with AsyncSessionLocal() as notify_db:
         result = await notify_db.execute(
             select(conversations.c.type, conversations.c.household_id)
             .where(conversations.c.id == conv_id)
@@ -257,7 +270,7 @@ async def _handle_ws_typing(sender_id: int, data: dict):
     if not conv_id:
         return
 
-    async with AssyncSessionLocal() as db:
+    async with AsyncSessionLocal() as db:
         participant_ids = await _get_participant_ids(db, conv_id)
         if sender_id not in participant_ids:
             return
@@ -284,7 +297,7 @@ async def _handle_ws_read(user_id: int, data: dict):
         return
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    async with AssyncSessionLocal() as db:
+    async with AsyncSessionLocal() as db:
         await db.execute(
             update(conversation_participants)
             .where(

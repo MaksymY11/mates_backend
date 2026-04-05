@@ -14,7 +14,7 @@ if not ASYNC_DATABASE_URL:
 engine = create_async_engine(ASYNC_DATABASE_URL, echo=False)
 
 # Session factory, each request gets its own session
-AssyncSessionLocal = sessionmaker(
+AsyncSessionLocal = sessionmaker(
     bind = engine,
     class_ = AsyncSession,
     expire_on_commit=False,
@@ -25,5 +25,5 @@ metadata = MetaData()
 
 # Dependency for FastAPI routes
 async def get_db():
-    async with AssyncSessionLocal() as session:
+    async with AsyncSessionLocal() as session:
         yield session

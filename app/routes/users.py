@@ -4,7 +4,7 @@ from sqlalchemy import select, update, delete, insert
 from sqlalchemy.exc import IntegrityError
 from app.database import get_db
 from app.models import users, refresh_tokens
-from app.security import hash_password, verify_password
+from app.security import hash_password, verify_password, pwd_context
 from app.limiter import limiter
 from app.deps import bearer_scheme, get_current_user
 from app.auth import (
@@ -17,7 +17,6 @@ from pydantic import BaseModel, EmailStr, Field
 import os
 import secrets
 import uuid
-import shutil
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from PIL import Image, UnidentifiedImageError
@@ -28,6 +27,8 @@ import aiofiles
 # otherwise a relative path will be returned (served from /static).
 AVATAR_DIR = Path("static/avatars")  # local relative to project root
 BASE_URL = os.getenv("BASE_URL", "").strip()
+_DUMMY_HASH = "$2b$12$LJ3m4ys3Lg2HEAiTL1a5iOsEejlnBMkLCDCySF3GHIV3TfFOOSY0i"
+
 if BASE_URL:
     AVATAR_URL_PREFIX = BASE_URL.rstrip("/") + "/static/avatars"
 else:
@@ -87,7 +88,11 @@ async def register_user(request: Request, user: UserRegister, response: Response
 async def login_user(request: Request, user: UserLogin, response: Response, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(users).where(users.c.email == user.email))
     db_user = result.fetchone()
-    if not db_user or not verify_password(user.password, db_user.password):
+    
+    if not db_user:
+        verify_password(user.password, _DUMMY_HASH)
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not verify_password(user.password, db_user.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     # Generate tokens with expiration
