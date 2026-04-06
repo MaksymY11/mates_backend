@@ -1,15 +1,14 @@
-from fastapi import Depends, APIRouter, HTTPException, Response, Request, Body, UploadFile, File
+from fastapi import Depends, APIRouter, HTTPException, Request, Body, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, insert
 from sqlalchemy.exc import IntegrityError
 from app.database import get_db
 from app.models import users, refresh_tokens
-from app.security import hash_password, verify_password, pwd_context
+from app.security import hash_password, verify_password
 from app.limiter import limiter
-from app.deps import bearer_scheme, get_current_user
+from app.deps import get_current_user
 from app.auth import (
     create_access_token,
-    verify_access_token,
     ACCESS_TOKEN_EXPIRE_MINUTES,
     REFRESH_TOKEN_EXPIRE_MINUTES,
 )
@@ -42,11 +41,16 @@ class UserLogin(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1)
 
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
 router = APIRouter()
 
 @router.post("/registerUser")
 @limiter.limit("5/15minutes")
-async def register_user(request: Request, user: UserRegister, response: Response, db: AsyncSession = Depends(get_db)):
+async def register_user(request: Request, user: UserRegister, db: AsyncSession = Depends(get_db)):
+    """Register a new user and return access + refresh tokens."""
+
     # user.email and user.password (dot notation)
     hashed_password = hash_password(user.password)
     try:
@@ -73,19 +77,13 @@ async def register_user(request: Request, user: UserRegister, response: Response
         )
     )
     await db.commit()
-    response.set_cookie(
-        "refresh_token",
-        r_token,
-        httponly= True,
-        secure= True,
-        samesite= "strict",
-        max_age= REFRESH_TOKEN_EXPIRE_MINUTES * 60,
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"access_token": access_token, "refresh_token": r_token, "token_type": "bearer"}
 
 @router.post("/loginUser")
 @limiter.limit("5/15minutes")
-async def login_user(request: Request, user: UserLogin, response: Response, db: AsyncSession = Depends(get_db)):
+async def login_user(request: Request, user: UserLogin, db: AsyncSession = Depends(get_db)):
+    """Authenticate user credentials and return access + refresh tokens."""
+
     result = await db.execute(select(users).where(users.c.email == user.email))
     db_user = result.fetchone()
     
@@ -110,22 +108,14 @@ async def login_user(request: Request, user: UserLogin, response: Response, db: 
         )
     )
     await db.commit()
-    response.set_cookie(
-        "refresh_token",
-        r_token,
-        httponly=True,
-        secure=True,
-        samesite="strict",
-        max_age=REFRESH_TOKEN_EXPIRE_MINUTES * 60,
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"access_token": access_token, "refresh_token": r_token, "token_type": "bearer"}
 
 @router.post("/refreshToken")
 @limiter.limit("10/15minutes")
-async def refresh_token(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
-    r_token = request.cookies.get("refresh_token")
-    if not r_token:
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
+async def refresh_token(request: Request, body: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    """Exchange a valid refresh token for a new access + refresh token pair. Old token is consumed."""
+
+    r_token = body.refresh_token
     
     result = await db.execute(
         select(refresh_tokens).where(refresh_tokens.c.token == r_token)
@@ -148,32 +138,27 @@ async def refresh_token(request: Request, response: Response, db: AsyncSession =
     )
     await db.commit()
     new_access_token = create_access_token({"email": record.user_email})
-    response.set_cookie(
-        "refresh_token",
-        new_r_token,
-        httponly=True,
-        secure=True,
-        samesite="strict",
-        max_age=REFRESH_TOKEN_EXPIRE_MINUTES * 60,
-    )
-    return {"access_token": new_access_token, "token_type": "bearer"}
+
+    return {"access_token": new_access_token, "refresh_token": new_r_token, "token_type": "bearer"}
 
 
 @router.post("/logout")
 @limiter.limit("5/15minutes")
-async def logout(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
-    r_token = request.cookies.get("refresh_token")
-    if r_token:
-        await db.execute(
-            delete(refresh_tokens).where(refresh_tokens.c.token == r_token)
-        )
-        await db.commit()
-    response.delete_cookie("refresh_token")
+async def logout(request: Request, body: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    """Invalidate the provided refresh token."""
+
+    r_token = body.refresh_token
+    await db.execute(
+        delete(refresh_tokens).where(refresh_tokens.c.token == r_token)
+    )
+    await db.commit()
     return {"detail": "logged out"}
 
 # Returning logged-in user's profile data
 @router.get("/me")
 async def get_me(payload: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Return the authenticated user's profile (excludes password hash)."""
+    
     email = payload["email"]
     result = await db.execute(select(users).where(users.c.email == email))
     record = result.fetchone()
@@ -190,6 +175,8 @@ async def update_user(
     data: dict = Body(...),
     db: AsyncSession = Depends(get_db)
 ):
+    """Update allowed profile fields for the authenticated user."""
+
     email = payload["email"]
 
     # filter allowed fields
@@ -221,6 +208,8 @@ async def upload_avatar(
     payload: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    """Upload and validate an avatar image. Generates a thumbnail and cleans up the previous avatar."""
+    
     # Basic client-provided MIME check (still validate content below)
     if file.content_type not in ("image/jpeg", "image/png", "image/gif"):
         raise HTTPException(status_code=400, detail="Unsupported image type")
