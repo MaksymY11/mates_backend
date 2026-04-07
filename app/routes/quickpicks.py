@@ -2,6 +2,7 @@ from fastapi import Depends, APIRouter, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, insert, delete, func, or_, and_, update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.database import get_db
 from app.models import (
     users,
@@ -462,28 +463,19 @@ async def submit_answer(
     if session.status == "completed":
         raise HTTPException(status_code=400, detail="Session already completed")
 
-    # Check for duplicate answer
-    result = await db.execute(
-        select(quick_pick_answers.c.id).where(
-            quick_pick_answers.c.session_id == session_id,
-            quick_pick_answers.c.user_id == me,
-            quick_pick_answers.c.question_index == question_index,
-        )
-    )
-    if result.fetchone():
-        raise HTTPException(status_code=409, detail="Already answered this question")
-
-    # Insert answer
+    # Insert answer, do nothing if answer already exists (duplicate)
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    await db.execute(
-        insert(quick_pick_answers).values(
+    result = await db.execute(
+        pg_insert(quick_pick_answers).values(
             session_id=session_id,
             user_id=me,
             question_index=question_index,
             selected_option=selected_option,
             answered_at=now,
-        )
+        ).on_conflict_do_nothing(index_elements=["session_id", "user_id", "question_index"])
     )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=409, detail="Already answered this question")
 
     # Count this user's answers to determine if they've finished all 5
     result = await db.execute(

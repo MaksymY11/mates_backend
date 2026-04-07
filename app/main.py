@@ -9,6 +9,7 @@ from pathlib import Path
 from app.limiter import limiter
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+import os
 from app.routes import users  # APIRouter with /registerUser, /loginUser, etc
 from app.routes import apartments  # APIRouter with /apartments/* endpoints
 from app.routes import vibe  # APIRouter with /vibe/* endpoints
@@ -30,14 +31,10 @@ app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://matesv1.netlify.app",
-        "http://localhost:3000",
-        "http://localhost:8080"
-    ],
+    allow_origins=os.getenv("CORS_ORIGINS").split(","),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # Implement Limiter

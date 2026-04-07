@@ -383,9 +383,6 @@ async def delete_household(
     if membership.role != "creator":
         raise HTTPException(status_code=403, detail="Only the creator can delete the household")
 
-    await db.execute(
-        delete(household_members).where(household_members.c.household_id == household_id)
-    )
     await db.execute(delete(households).where(households.c.id == household_id))
 
     await db.commit()
