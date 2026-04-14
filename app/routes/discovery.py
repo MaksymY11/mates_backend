@@ -185,39 +185,37 @@ async def _ensure_clustering(db: AsyncSession, user_id: int) -> None:
             await _run_clustering(db)
 
 
-async def _user_summary(db: AsyncSession, user_id: int) -> dict:
-    """Build a compact user summary dict for neighbor listings."""
+async def _user_summaries(db: AsyncSession, member_rows) -> list[dict]:
+    """Batch-fetch user profiles with vibe data for a list of neighborhood members.
+       Returns a list of summary dicts with user info, vibe labels, and preference weights."""
+
     result = await db.execute(
         select(
-            users.c.id, users.c.name, users.c.avatar_url,
-            users.c.city, users.c.state, users.c.budget, users.c.move_in_date,
-        ).where(users.c.id == user_id)
+            users.c.id, users.c.name, users.c.avatar_url, 
+            users.c.city, users.c.state, users.c.budget, users.c.move_in_date, 
+            preference_profiles.c.vibe_labels, preference_profiles.c.weights,
+        )
+        .select_from(users.join(preference_profiles, preference_profiles.c.user_id == users.c.id))
+        .where(users.c.id.in_(mr.user_id for mr in member_rows))
     )
-    u = result.fetchone()
-    if not u:
-        return {}
+    rows = result.fetchall()
 
-    # Vibe labels + weights
-    result = await db.execute(
-        select(preference_profiles.c.vibe_labels, preference_profiles.c.weights)
-        .where(preference_profiles.c.user_id == user_id)
-    )
-    prof = result.fetchone()
-    vibe_labels = (prof.vibe_labels if prof else None) or []
-    weights = (prof.weights if prof else None) or {}
+    summaries = []
+    for r in rows:
+        summary = {
+            "id": r.id,
+            "name": r.name,
+            "avatar_url": r.avatar_url,
+            "city": r.city,
+            "state": r.state,
+            "budget": r.budget,
+            "move_in_date": r.move_in_date.isoformat() if r.move_in_date else None,
+            "vibe_labels": r.vibe_labels,
+            "_weights": r.weights,
+        }
+        summaries.append(summary)
 
-    return {
-        "id": u.id,
-        "name": u.name,
-        "avatar_url": u.avatar_url,
-        "city": u.city,
-        "state": u.state,
-        "budget": u.budget,
-        "move_in_date": u.move_in_date.isoformat() if u.move_in_date else None,
-        "vibe_labels": vibe_labels,
-        "_weights": weights,  # internal, stripped before response
-    }
-
+    return summaries
 
 # ── Endpoints ────────────────────────────────────────────────────
 
@@ -267,22 +265,29 @@ async def get_my_neighborhood(
             neighborhood_members.c.user_id,
         ).where(
             neighborhood_members.c.neighborhood_id == membership.neighborhood_id,
+            neighborhood_members.c.user_id != user_id,
         )
     )
     member_rows = result.fetchall()
-
+    if not member_rows:
+        return {
+            "neighborhood": {
+                "id": hood.id,
+                "name": hood.name,
+                "vibe_description": hood.vibe_description,
+            },
+            "my_similarity_score": membership.similarity_score,
+            "neighbors": None,
+        }
+    
+    summaries = await _user_summaries(db, member_rows)
     neighbors = []
-    for mr in member_rows:
-        if mr.user_id == user_id:
+    for s in summaries:
+        if not _location_matches(my_loc, s.get("city"), s.get("state")):
             continue
-        summary = await _user_summary(db, mr.user_id)
-        if summary:
-            # Filter by location preference
-            if not _location_matches(my_loc, summary.get("city"), summary.get("state")):
-                continue
-            their_weights = summary.pop("_weights", {})
-            summary["similarity_score"] = round(similarity_score(my_weights, their_weights), 3)
-            neighbors.append(summary)
+        their_weights = s.pop("_weights", {})
+        s["similarity_score"] = round(similarity_score(my_weights, their_weights), 3)
+        neighbors.append(s)
 
     # Sort by similarity descending
     neighbors.sort(key=lambda x: x.get("similarity_score", 0), reverse=True)
@@ -361,15 +366,15 @@ async def get_nearby_neighborhoods(
             .where(neighborhood_members.c.neighborhood_id == h.id)
         )
         all_member_rows = result.fetchall()
+
+        summaries = await _user_summaries(db, all_member_rows)
         matched_members = []
-        for mr in all_member_rows:
-            summary = await _user_summary(db, mr.user_id)
-            if summary:
-                if not _location_matches(my_loc, summary.get("city"), summary.get("state")):
-                    continue
-                their_weights = summary.pop("_weights", {})
-                summary["similarity_score"] = round(similarity_score(my_weights, their_weights), 3)
-                matched_members.append(summary)
+        for s in summaries:
+            if not _location_matches(my_loc, s.get("city"), s.get("state")):
+                continue
+            their_weights = s.pop("_weights", {})
+            s["similarity_score"] = round(similarity_score(my_weights, their_weights), 3)
+            matched_members.append(s)
 
         if not matched_members:
             continue
