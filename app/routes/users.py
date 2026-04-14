@@ -20,6 +20,7 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from PIL import Image, UnidentifiedImageError
 import aiofiles
+import logging
 
 # Use a local writable static folder by default so avatars persist locally.
 # Set `BASE_URL` in your env (e.g. https://example.com) to return full URLs;
@@ -234,7 +235,7 @@ async def upload_avatar(
                     try:
                         await afp.close()
                     except Exception:
-                        pass
+                        logging.warning("Failed to close temp file handle during size check", exc_info=True)
                     tmp_path.unlink(missing_ok=True)
                     raise HTTPException(status_code=400, detail="File too large")
                 await afp.write(chunk)
@@ -280,8 +281,7 @@ async def upload_avatar(
                 im_rgb.save(thumb_path, format="JPEG", quality=85)
                 thumb_url = f"{prefix}/{thumb_name}"
         except Exception:
-            # Thumbnailing is non-critical, log and continue
-            pass
+            logging.warning("Thumbnail creation failed for %s", filename, exc_info=True)
 
         # update user's avatar_url in DB, but first remember previous avatar to delete
         email = payload["email"]
@@ -300,7 +300,7 @@ async def upload_avatar(
             try:
                 target.unlink(missing_ok=True)
             except Exception:
-                pass
+                logging.exception("Failed to clean up uploaded file %s", target)
             raise HTTPException(status_code=500, detail="Failed to update avatar")
 
         # Delete previous avatar file if it was stored locally under our static folder
@@ -313,7 +313,7 @@ async def upload_avatar(
                     if prev_path.exists():
                         prev_path.unlink(missing_ok=True)
             except Exception:
-                pass
+                logging.warning("Failed to delete previous avatar %s", prev_fname)
 
         return {"avatar_url": avatar_url, "avatar_thumb_url": thumb_url}
     finally:
@@ -321,4 +321,4 @@ async def upload_avatar(
         try:
             await file.close()
         except Exception:
-            pass
+            logging.warning("Failed to close upload file handle", exc_info=True)

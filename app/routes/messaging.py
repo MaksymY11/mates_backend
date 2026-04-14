@@ -119,15 +119,22 @@ async def websocket_endpoint(ws: WebSocket):
     await manager.connect(user_id, ws)
 
     try:
+        bad_msg_counter = 0
         while True:
             raw = await ws.receive_text()
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:
+                bad_msg_counter += 1
+                if bad_msg_counter > 10:
+                    await ws.close()
+                    manager.disconnect(user_id)
+                    break
                 continue
 
             msg_type = data.get("type")
 
+            bad_msg_counter = 0
             if msg_type == "message":
                 await _handle_ws_message(user_id, data)
             elif msg_type == "typing":
