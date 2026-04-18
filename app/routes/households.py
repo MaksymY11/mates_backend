@@ -15,7 +15,7 @@ from app.models import (
     conversations,
     conversation_participants,
 )
-from app.deps import get_current_user
+from app.deps import require_verified_user
 from app.notifications import create_notification
 from datetime import datetime, timezone, timedelta
 
@@ -156,7 +156,7 @@ async def _resolve_rule(db: AsyncSession, household_id: int, member_count: int, 
 @router.post("/households/")
 async def create_household(
     body: dict,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a household. Creator auto-becomes a member with role 'creator'."""
@@ -214,7 +214,7 @@ async def create_household(
 
 @router.get("/households/me")
 async def get_my_household(
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get current user's household with members and rules."""
@@ -307,7 +307,7 @@ async def get_my_household(
 
 @router.post("/households/leave")
 async def leave_household(
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Leave current household. Transfers creator role if needed. Deletes if last member."""
@@ -371,7 +371,7 @@ async def leave_household(
 @router.delete("/households/{household_id}")
 async def delete_household(
     household_id: int,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete household (creator only). Cascade deletes members, rules, votes, invites."""
@@ -389,12 +389,10 @@ async def delete_household(
     return {"detail": "Household deleted"}
 
 
-# ── Invites ──────────────────────────────────────────────────────
-
 @router.post("/households/invite/{user_id}")
 async def invite_user(
     user_id: int,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Invite a user to current household. Requires completed Quick Picks session."""
@@ -468,7 +466,7 @@ async def invite_user(
 
 @router.get("/households/invites")
 async def list_invites(
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List pending invites — both sent and received."""
@@ -534,7 +532,7 @@ async def list_invites(
 @router.post("/households/invites/{invite_id}/accept")
 async def accept_invite(
     invite_id: int,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Accept an invite and join the household as 'member'."""
@@ -630,7 +628,7 @@ async def accept_invite(
 @router.post("/households/invites/{invite_id}/decline")
 async def decline_invite(
     invite_id: int,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Decline a household invite."""
@@ -657,7 +655,7 @@ async def decline_invite(
 @router.get("/households/{household_id}/rules")
 async def list_rules(
     household_id: int,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List all rules with vote counts and current user's vote."""
@@ -714,7 +712,7 @@ async def list_rules(
 async def propose_rule(
     household_id: int,
     body: dict,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Propose a new house rule."""
@@ -786,7 +784,7 @@ async def propose_rule(
 async def vote_on_rule(
     rule_id: int,
     body: dict,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Vote on a house rule. Auto-resolves when majority reached."""
@@ -849,7 +847,7 @@ async def vote_on_rule(
 @router.post("/households/rules/{rule_id}/propose-removal")
 async def propose_rule_removal(
     rule_id: int,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Propose removal of an accepted rule. Resets votes, starts a removal vote."""
@@ -920,7 +918,7 @@ async def propose_rule_removal(
 @router.delete("/households/rules/{rule_id}")
 async def delete_rule(
     rule_id: int,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a rule (proposer or creator only)."""
@@ -952,11 +950,9 @@ async def delete_rule(
     return {"detail": "Rule deleted"}
 
 
-# ── Eligible Connections ─────────────────────────────────────────
-
 @router.get("/households/eligible")
 async def list_eligible_connections(
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List users with completed Quick Picks sessions who aren't in a household."""

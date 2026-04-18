@@ -10,7 +10,7 @@ from app.models import (
     quick_pick_sessions,
     notifications,
 )
-from app.deps import get_current_user
+from app.deps import require_verified_user
 from app.auth import verify_access_token
 from app.notifications import create_notification
 from datetime import datetime, timezone
@@ -58,10 +58,10 @@ manager = ConnectionManager()
 async def _resolve_user_id(db: AsyncSession, payload: dict) -> int:
     email = payload["email"]
     result = await db.execute(select(users.c.id).where(users.c.email == email))
-    row = result.fetchone()
-    if not row:
+    record = result.fetchone()
+    if not record:
         raise HTTPException(status_code=404, detail="User not found")
-    return row.id
+    return record.id
 
 
 async def _has_completed_session(db: AsyncSession, user_a: int, user_b: int) -> bool:
@@ -108,13 +108,16 @@ async def websocket_endpoint(ws: WebSocket):
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(
-            select(users.c.id).where(users.c.email == payload["email"])
+            select(users.c.id, users.c.email_verified).where(users.c.email == payload["email"])
         )
-        row = result.fetchone()
-        if not row:
+        record = result.fetchone()
+        if not record:
             await ws.close(code=4001)
             return
-        user_id = row.id
+        user_id = record.id
+        if not record.email_verified:
+            await ws.close(code=4003)
+            return
 
     await manager.connect(user_id, ws)
 
@@ -320,7 +323,7 @@ async def _handle_ws_read(user_id: int, data: dict):
 
 @router.get("/conversations")
 async def list_conversations(
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List user's conversations with last message and unread count."""
@@ -430,7 +433,7 @@ async def get_messages(
     conversation_id: int,
     before: int | None = None,
     limit: int = 50,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Cursor-paginated message history. Ordered by created_at ASC."""
@@ -482,7 +485,7 @@ async def get_messages(
 @router.post("/conversations/dm/{user_id}")
 async def create_dm(
     user_id: int,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Create or return existing DM conversation. Requires completed Quick Picks."""
@@ -560,7 +563,7 @@ async def create_dm(
 @router.post("/conversations/{conversation_id}/read")
 async def mark_read(
     conversation_id: int,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Mark conversation as read for current user."""

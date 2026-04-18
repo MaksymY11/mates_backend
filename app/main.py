@@ -11,6 +11,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 import os
 from app.routes import users  # APIRouter with /registerUser, /loginUser, etc
+from app.routes import verification # APIrouter with /verifyEmail, /forgotPassword, etc
 from app.routes import apartments  # APIRouter with /apartments/* endpoints
 from app.routes import vibe  # APIRouter with /vibe/* endpoints
 from app.routes import scenarios  # APIRouter with /scenarios/* endpoints
@@ -43,6 +44,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Register user routes
 app.include_router(users.router)
+app.include_router(verification.router)
 app.include_router(apartments.router)
 app.include_router(vibe.router)
 app.include_router(scenarios.router)

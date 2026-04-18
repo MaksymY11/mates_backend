@@ -9,7 +9,7 @@ from app.models import (
     apartments,
     apartment_items,
 )
-from app.deps import get_current_user
+from app.deps import require_verified_user
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from collections import defaultdict
@@ -99,7 +99,7 @@ async def get_presets(db: AsyncSession = Depends(get_db)):
 
 @router.post("/")
 async def create_apartment(
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Create an apartment for the current user (idempotent)."""
@@ -131,7 +131,7 @@ async def create_apartment(
 @router.post("/apply-preset")
 async def apply_preset(
     body: ApplyPresetRequest,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Apply a style preset to a zone — replaces all items in that zone."""
@@ -193,7 +193,7 @@ async def apply_preset(
 
 @router.get("/me")
 async def get_my_apartment(
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Current user's apartment + placed items."""
@@ -205,7 +205,7 @@ async def get_my_apartment(
 @router.get("/{user_id}")
 async def get_user_apartment(
     user_id: int,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """View another user's apartment."""
@@ -216,7 +216,7 @@ async def get_user_apartment(
 @router.post("/items")
 async def place_item(
     body: PlaceItemRequest,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Place a furniture item. Enforces constraint groups within a zone."""
@@ -294,7 +294,7 @@ async def place_item(
 @router.delete("/items/{item_id}")
 async def remove_item(
     item_id: int,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Remove a placed item. Must belong to the current user's apartment."""

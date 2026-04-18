@@ -2,11 +2,8 @@ from fastapi import Depends, APIRouter, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, insert, delete, update
 from app.database import get_db
-from app.models import (
-    users,
-    device_tokens
-)
-from app.deps import get_current_user
+from app.models import users, device_tokens
+from app.deps import require_verified_user
 from datetime import datetime, timezone
 
 router = APIRouter(tags=["devices"])
@@ -26,7 +23,7 @@ async def _resolve_user_id(db: AsyncSession, payload: dict) -> int:
 @router.post("/devices/register")
 async def register_device(
     body: dict,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Register or reassign an FCM device token for the current user.
@@ -68,7 +65,7 @@ async def register_device(
 @router.delete("/devices/unregister")
 async def unregister_device(
     body: dict,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Remove an FCM device token. Called on logout to stop push notifications for this device."""

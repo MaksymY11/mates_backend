@@ -9,7 +9,7 @@ from app.models import (
     furniture_catalog,
     preference_profiles,
 )
-from app.deps import get_current_user
+from app.deps import require_verified_user
 from app.vibe_engine import calculate_weights, weights_to_labels, compare_profiles
 from datetime import datetime, timezone
 
@@ -108,7 +108,7 @@ async def _get_profile(db: AsyncSession, user_id: int) -> dict:
 
 @router.get("/me")
 async def get_my_vibe(
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Current user's vibe profile. Recalculates if stale or missing."""
@@ -119,7 +119,7 @@ async def get_my_vibe(
 @router.get("/compare/{user_id}")
 async def compare_vibe(
     user_id: int,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Compare current user's vibe with another user's."""
@@ -145,7 +145,7 @@ async def compare_vibe(
 @router.get("/{user_id}")
 async def get_user_vibe(
     user_id: int,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Another user's vibe profile."""
@@ -158,7 +158,7 @@ async def get_user_vibe(
 
 @router.post("/recalculate")
 async def force_recalculate(
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Force recalculation of current user's vibe profile."""

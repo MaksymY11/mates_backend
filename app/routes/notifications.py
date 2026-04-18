@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func
 from app.database import get_db
 from app.models import notifications, users
-from app.deps import get_current_user
+from app.deps import require_verified_user
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
@@ -23,7 +23,7 @@ async def _resolve_user_id(db: AsyncSession, payload: dict) -> int:
 async def list_notifications(
     limit: int = 50,
     offset: int = 0,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List current user's notifications, newest first, with actor info."""
@@ -76,7 +76,7 @@ async def list_notifications(
 @router.post("/{notification_id}/read")
 async def mark_read(
     notification_id: int,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Mark a single notification as read."""
@@ -94,7 +94,7 @@ async def mark_read(
 
 @router.post("/read-all")
 async def mark_all_read(
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Mark all of current user's unread notifications as read."""
@@ -110,7 +110,7 @@ async def mark_all_read(
 
 @router.delete("/")
 async def clear_all_notifications(
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete all notifications for current user."""
@@ -125,7 +125,7 @@ async def clear_all_notifications(
 @router.delete("/{notification_id}")
 async def delete_notification(
     notification_id: int,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a notification."""
