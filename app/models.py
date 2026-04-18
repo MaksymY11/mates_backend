@@ -21,6 +21,7 @@ users = Table(
     Column("activities", JSON, nullable=True),
     Column("prefs", JSON, nullable=True),
     Column("location_preference", String, nullable=False, server_default="same_city"),
+    Column("email_verified", Boolean, nullable=False, server_default="false"),
 )
 
 refresh_tokens = Table(
@@ -29,6 +30,18 @@ refresh_tokens = Table(
     Column("token", String, primary_key=True, index=True),
     Column("user_email", String, ForeignKey("users.email", ondelete="CASCADE"), index=True),
     Column("expires_at", DateTime),
+)
+
+verification_codes = Table(
+    "verification_codes",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("user_email", String, nullable=False, index=True),
+    Column("code_hash", String, nullable=False),
+    Column("purpose", String, nullable=False), # email verification or password reset
+    Column("expires_at", DateTime, nullable=False),
+    Column("used", Boolean, nullable=False, server_default="false"),
+    Column("created_at", DateTime, nullable=False),
 )
 
 furniture_catalog = Table(

@@ -13,7 +13,7 @@ from app.models import (
     scenarios,
     scenario_responses,
 )
-from app.deps import get_current_user
+from app.deps import require_verified_user
 from app.clustering import (
     kmeans_cluster,
     euclidean_distance,
@@ -221,7 +221,7 @@ async def _user_summaries(db: AsyncSession, member_rows) -> list[dict]:
 
 @router.get("/neighborhood")
 async def get_my_neighborhood(
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -305,7 +305,7 @@ async def get_my_neighborhood(
 
 @router.get("/nearby")
 async def get_nearby_neighborhoods(
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -396,7 +396,7 @@ async def get_nearby_neighborhoods(
 @router.get("/user/{user_id}/summary")
 async def get_user_summary(
     user_id: int,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -486,7 +486,7 @@ async def get_user_summary(
 
 @router.post("/recalculate")
 async def recalculate_neighborhoods(
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Force re-clustering of all users. Debug/admin endpoint (still requires auth)."""

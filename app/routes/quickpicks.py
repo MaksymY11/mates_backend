@@ -12,7 +12,7 @@ from app.models import (
     quick_pick_answers,
     preference_profiles,
 )
-from app.deps import get_current_user
+from app.deps import require_verified_user
 from app.notifications import create_notification
 from datetime import datetime, timezone
 import random
@@ -135,7 +135,7 @@ async def _user_info(db: AsyncSession, user_id: int) -> dict:
 @router.post("/interest/{user_id}")
 async def express_interest(
     user_id: int,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Express interest in another user. If mutual, auto-creates a Quick Picks session."""
@@ -237,7 +237,7 @@ async def express_interest(
 @router.delete("/interest/{user_id}")
 async def withdraw_interest(
     user_id: int,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Withdraw interest in another user.
@@ -282,7 +282,7 @@ async def withdraw_interest(
 
 @router.get("/interest/sent")
 async def list_sent_interests(
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Return all user IDs the current user has waved at.
@@ -299,7 +299,7 @@ async def list_sent_interests(
 
 @router.get("/interest/mutual")
 async def list_mutual_interests(
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List all mutual interests with Quick Picks session status.
@@ -365,7 +365,7 @@ async def list_mutual_interests(
 @router.get("/quickpicks/session/{user_id}")
 async def get_session(
     user_id: int,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get the Quick Picks session between current user and target user.
@@ -426,7 +426,7 @@ async def get_session(
 @router.post("/quickpicks/answer")
 async def submit_answer(
     body: dict,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Record an answer to one Quick Picks question.
@@ -530,7 +530,7 @@ async def submit_answer(
 @router.get("/quickpicks/results/{session_id}")
 async def get_results(
     session_id: int,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Side-by-side results for a completed Quick Picks session.

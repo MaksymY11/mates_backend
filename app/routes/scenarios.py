@@ -8,7 +8,7 @@ from app.models import (
     scenario_responses,
     daily_scenario_assignments,
 )
-from app.deps import get_current_user
+from app.deps import require_verified_user
 from pydantic import BaseModel
 from datetime import datetime, timezone, date
 from typing import Optional
@@ -83,7 +83,7 @@ async def _get_current_responses(db: AsyncSession, user_id: int) -> list[dict]:
 
 @router.get("/daily")
 async def get_daily_scenario(
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -182,7 +182,7 @@ async def get_daily_scenario(
 @router.post("/answer")
 async def answer_scenario(
     body: AnswerRequest,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -282,7 +282,7 @@ async def answer_scenario(
 
 @router.post("/skip")
 async def skip_scenario(
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -311,7 +311,7 @@ async def skip_scenario(
 
 @router.get("/history")
 async def get_history(
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Current user's active scenario responses (max 3)."""
@@ -323,7 +323,7 @@ async def get_history(
 @router.get("/compare/{user_id}")
 async def compare_scenarios(
     user_id: int,
-    payload: dict = Depends(get_current_user),
+    payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
