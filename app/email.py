@@ -5,7 +5,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 RESEND_API_URL = "https://api.resend.com/emails"
-FROM_EMAIL = "onboarding@resend.dev"
+FROM_EMAIL = "noreply@mail.findmates.net"
 
 # ── Helpers ──────────────────────────────────────────────────────
 
@@ -31,8 +31,7 @@ async def _send(to_email: str, subject: str, html: str) -> bool:
             response.raise_for_status()
             return True
     except httpx.HTTPError as e:
-        # CHANGE BACK TO logger.error("Failed to send email to %s: %s", to_email, e)
-        print(f"Resend error {e.response.status_code}: {e.response.text}") 
+        logger.error("Failed to send email to %s: %s", to_email, e)
         return False
 
 # ── Public Methods ────────────────────────────────────────────────
