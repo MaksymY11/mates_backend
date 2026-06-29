@@ -10,6 +10,7 @@ users = Table(
     Column("email", String, unique=True, index=True),
     Column("password", String),
     Column("avatar_url", String, nullable=True),
+    Column("avatar_thumb_url", String, nullable=True),
     Column("name", String, nullable=True),
     Column("age", Integer, nullable=True),
     Column("state", String, nullable=True),

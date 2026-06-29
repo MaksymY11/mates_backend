@@ -24,8 +24,6 @@ from app.routes import devices # APIRouter with /devices/* endpoints
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    Path("static/avatars").mkdir(parents=True,exist_ok=True)
     yield
 
 app = FastAPI(lifespan=lifespan)

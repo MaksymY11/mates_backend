@@ -23,24 +23,14 @@ from app.email import send_verification_email
 from pydantic import BaseModel, EmailStr, Field
 import os
 import secrets
-import uuid
-from pathlib import Path
+import asyncio
+from io import BytesIO
 from datetime import datetime, timedelta, timezone
-from PIL import Image, UnidentifiedImageError
-import aiofiles
+from PIL import Image
+from app.storage import upload_avatar
 import logging
 
-# Use a local writable static folder by default so avatars persist locally.
-# Set `BASE_URL` in your env (e.g. https://example.com) to return full URLs;
-# otherwise a relative path will be returned (served from /static).
-AVATAR_DIR = Path("static/avatars")  # local relative to project root
-BASE_URL = os.getenv("BASE_URL", "").strip()
 _DUMMY_HASH = "$2b$12$LJ3m4ys3Lg2HEAiTL1a5iOsEejlnBMkLCDCySF3GHIV3TfFOOSY0i"
-
-if BASE_URL:
-    AVATAR_URL_PREFIX = BASE_URL.rstrip("/") + "/static/avatars"
-else:
-    AVATAR_URL_PREFIX = "/static/avatars"
 
 class UserRegister(BaseModel):
     email: EmailStr
@@ -284,122 +274,50 @@ async def update_user(
     return {"detail": "Profile updated successfully"}
 
 @router.post("/uploadAvatar")
-async def upload_avatar(
+async def upload_avatar_endpoint(
     file: UploadFile = File(...),
-    request: Request = None,
     payload: dict = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Upload and validate an avatar image. Generates a thumbnail and cleans up the previous avatar."""
-    
-    # Basic client-provided MIME check (still validate content below)
+    """Upload and validate an avatar image. Converts to JPEG, generates a thumbnail, and uploads both to S3."""
+
     if file.content_type not in ("image/jpeg", "image/png", "image/gif"):
         raise HTTPException(status_code=400, detail="Unsupported image type")
 
     MAX_BYTES = 5 * 1024 * 1024
-    # Ensure avatar dir exists
-    AVATAR_DIR.mkdir(parents=True, exist_ok=True)
+    data = await file.read()
+    if len(data) > MAX_BYTES:
+        raise HTTPException(status_code=400, detail="File too large")
 
-    # Stream upload to a temporary file to avoid loading whole file into memory
-    tmp_name = f"tmp_{uuid.uuid4().hex}"
-    tmp_path = AVATAR_DIR / tmp_name
-    total = 0
     try:
-        async with aiofiles.open(tmp_path, "wb") as afp:
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > MAX_BYTES:
-                    # cleanup
-                    try:
-                        await afp.close()
-                    except Exception:
-                        logging.warning("Failed to close temp file handle during size check", exc_info=True)
-                    tmp_path.unlink(missing_ok=True)
-                    raise HTTPException(status_code=400, detail="File too large")
-                await afp.write(chunk)
+        with Image.open(BytesIO(data)) as img:
+            rgb = img.convert("RGB")
+            full_buf = BytesIO()
+            rgb.save(full_buf, format="JPEG", quality=85)
+            full_bytes = full_buf.getvalue()
 
-        # Validate image file using Pillow to avoid spoofed content-type
-        try:
-            with Image.open(tmp_path) as img:
-                img.verify()
-                fmt = img.format  # e.g. 'JPEG', 'PNG', 'GIF'
-        except UnidentifiedImageError:
-            tmp_path.unlink(missing_ok=True)
-            raise HTTPException(status_code=400, detail="Uploaded file is not a valid image")
-        except Exception:
-            tmp_path.unlink(missing_ok=True)
-            raise HTTPException(status_code=400, detail="Invalid image file")
+            rgb.thumbnail((200, 200))
+            thumb_buf = BytesIO()
+            rgb.save(thumb_buf, format="JPEG", quality=85)
+            thumb_bytes = thumb_buf.getvalue()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Uploaded file is not a valid image")
 
-        fmt = (fmt or "JPEG").upper()
-        ext_map = {"JPEG": ".jpg", "JPG": ".jpg", "PNG": ".png", "GIF": ".gif"}
-        ext = ext_map.get(fmt, Path(file.filename).suffix or ".jpg")
+    email = payload["email"]
+    result = await db.execute(select(users).where(users.c.email == email))
+    row = result.fetchone()
 
-        filename = f"{uuid.uuid4().hex}{ext}"
-        target = AVATAR_DIR / filename
-        # Move temp file into final filename (atomic on most OSes)
-        tmp_path.replace(target)
+    avatar_url, thumb_url = await asyncio.gather(
+        upload_avatar(row.id, full_bytes),
+        upload_avatar(row.id, thumb_bytes, suffix="_thumb"),
+    )
 
-        # Build avatar URL: prefer configured BASE_URL, otherwise use request.base_url
-        prefix = AVATAR_URL_PREFIX
-        if not BASE_URL and request is not None:
-            base = str(request.base_url).rstrip("/")
-            prefix = base + "/static/avatars"
-        avatar_url = f"{prefix}/{filename}"
+    await db.execute(
+        update(users).where(users.c.email == email).values(
+            avatar_url=avatar_url,
+            avatar_thumb_url=thumb_url,
+        )
+    )
+    await db.commit()
 
-        # create a thumbnail (small size) to serve to mobile clients and save alongside
-        thumb_url = None
-        try:
-            # Re-open the file to create thumbnail (verify() closed the previous handle)
-            with Image.open(target) as im:
-                thumb_size = (200, 200)
-                thumb_name = f"{Path(filename).stem}_thumb.jpg"
-                thumb_path = AVATAR_DIR / thumb_name
-                im_rgb = im.convert("RGB")
-                im_rgb.thumbnail(thumb_size)
-                im_rgb.save(thumb_path, format="JPEG", quality=85)
-                thumb_url = f"{prefix}/{thumb_name}"
-        except Exception:
-            logging.warning("Thumbnail creation failed for %s", filename, exc_info=True)
-
-        # update user's avatar_url in DB, but first remember previous avatar to delete
-        email = payload["email"]
-        # fetch existing avatar_url
-        result = await db.execute(select(users).where(users.c.email == email))
-        row = result.fetchone()
-        prev_avatar = row.avatar_url if row else None
-
-        try:
-            await db.execute(
-                update(users).where(users.c.email == email).values(avatar_url=avatar_url)
-            )
-            await db.commit()
-        except Exception:
-            # rollback - delete the newly written file
-            try:
-                target.unlink(missing_ok=True)
-            except Exception:
-                logging.exception("Failed to clean up uploaded file %s", target)
-            raise HTTPException(status_code=500, detail="Failed to update avatar")
-
-        # Delete previous avatar file if it was stored locally under our static folder
-        if prev_avatar:
-            try:
-                # prev_avatar may be absolute URL or relative path; extract filename if it points to /static/avatars
-                if prev_avatar.startswith(AVATAR_URL_PREFIX) or prev_avatar.startswith("/static/avatars"):
-                    prev_fname = Path(prev_avatar).name
-                    prev_path = AVATAR_DIR / prev_fname
-                    if prev_path.exists():
-                        prev_path.unlink(missing_ok=True)
-            except Exception:
-                logging.warning("Failed to delete previous avatar %s", prev_fname)
-
-        return {"avatar_url": avatar_url, "avatar_thumb_url": thumb_url}
-    finally:
-        # ensure UploadFile resources are closed
-        try:
-            await file.close()
-        except Exception:
-            logging.warning("Failed to close upload file handle", exc_info=True)
+    return {"avatar_url": avatar_url, "avatar_thumb_url": thumb_url}
