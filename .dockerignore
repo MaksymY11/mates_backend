@@ -1,0 +1,14 @@
+venv/
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+.env
+firebase-service-account.json
+static/avatars/*
+.git/
+.idea/
+.vscode/
+mates.db
+conftest.py
+pytest.ini
