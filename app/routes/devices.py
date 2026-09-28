@@ -1,82 +1,83 @@
-from fastapi import Depends, APIRouter, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, insert, delete, update
-from app.database import get_db
-from app.models import users, device_tokens
+from fastapi import Depends, APIRouter
 from app.deps import require_verified_user
-from datetime import datetime, timezone
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, insert, delete
+from app.database import get_db
+from pydantic import BaseModel
+from app.models import device_tokens, users
+from app.security import now
+from typing import Literal
 
-router = APIRouter(tags=["devices"])
+router = APIRouter(prefix="/devices", tags=["devices"])
 
-# ── Helpers ──────────────────────────────────────────────────────
+class DeviceRegister(BaseModel):
+    fcm_token: str
+    platform: Literal["android","ios","web"]
 
-async def _resolve_user_id(db: AsyncSession, payload: dict) -> int:
-    email = payload["email"]
-    result = await db.execute(select(users.c.id).where(users.c.email == email))
-    row = result.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="User not found")
-    return row.id
-
-# ── Device CRUD ──────────────────────────────────────────────────
-
-@router.post("/devices/register")
+class DeviceUnregister(BaseModel):
+    fcm_token: str
+    
+@router.post("/register")
 async def register_device(
-    body: dict,
+    body: DeviceRegister,
     payload: dict = Depends(require_verified_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    """Register or reassign an FCM device token for the current user.
-       If the token already exists (e.g. failed logout), reassigns it to the current user.
-       Called on app launch after Firebase initialization."""
-
-    me = await _resolve_user_id(db,payload)
-
-    platform = body.get("platform", "")
-
-    fcm_token = body.get("fcm_token", "")
-
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-
+    """
+    - body: DeviceRegister is read from frontend. Contains fcm_token & platform.
+    - payload: recieved from require_verified user. Contains user's email and expiration date.
+    - db: establishes a new session to connect to the database and to read/write.
+    - Creates a new entry in db with user's fcm_token. If fcm_token already exists, moves it to the current user. 
+    - One user can have multiple entries if they logged in with different platforms.
+    """
     result = await db.execute(
-        select(device_tokens.c.fcm_token).where(device_tokens.c.fcm_token == fcm_token)
+        select(users.c.id)
+        .where(users.c.email == payload["email"])
     )
-    exists = result.fetchone()
-    if exists:
-        # User Logs in from same device to another account
-        await db.execute(
-            update(device_tokens)
-            .where(device_tokens.c.fcm_token == fcm_token)
-            .values(user_id=me)
-        )
-    else:
-        result = await db.execute(
-            insert(device_tokens).values(
-                user_id = me,
-                fcm_token = fcm_token,
-                platform = platform,
-                created_at = now
-            )
-        )
+    record = result.fetchone()
 
-    await db.commit()
-    return {"detail": "ok"}
-
-@router.delete("/devices/unregister")
-async def unregister_device(
-    body: dict,
-    payload: dict = Depends(require_verified_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """Remove an FCM device token. Called on logout to stop push notifications for this device."""
-    me = await _resolve_user_id(db,payload)
-    fcm_token = body["fcm_token"]
-
-    result = await db.execute(
+    # Always try to delete the token, even without checking if it exists. If it doesn't exist it just returns nothing.
+    await db.execute(
         delete(device_tokens)
-        .where(device_tokens.c.fcm_token == fcm_token)
-        .where(device_tokens.c.user_id == me)
+        .where(device_tokens.c.fcm_token == body.fcm_token)
     )
 
+    await db.execute(
+        insert(device_tokens)
+        .values(
+            user_id = record.id,
+            fcm_token = body.fcm_token,
+            platform = body.platform,
+            created_at = now(),
+        )
+    )
     await db.commit()
-    return {"detail": "ok"}
+
+    return {"detail": "fcm_token has been registered."}
+
+@router.delete("/unregister")
+async def unregister_device(
+    body: DeviceUnregister,
+    payload: dict = Depends(require_verified_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    - body: DeviceUnregister is read from frontend. Contains ONLY fcm_token.
+    - payload: recieved from require_verified user. Contains user's email and expiration date.
+    - db: establishes a new session to connect to the database and to read/write.
+    - Unregisters user's token.
+    """
+    result = await db.execute(
+        select(users.c.id)
+        .where(users.c.email == payload["email"])
+    )
+    record = result.fetchone()
+
+    await db.execute(
+        delete(device_tokens)
+        .where(device_tokens.c.fcm_token == body.fcm_token, device_tokens.c.user_id == record.id)
+    )
+    await db.commit()
+
+    return {"detail": "device token has been unregistered."}
+    

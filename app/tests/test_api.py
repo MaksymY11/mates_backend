@@ -20,6 +20,9 @@ from app.seed_users import seed as seed_users
 # Connection URL
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 
+# Email verification tests for test users isn't set up yet.
+os.environ["SKIP_EMAIL_VERIFICATION"] = "true"
+
 # Engine to make and test db connection
 engine = create_async_engine(TEST_DATABASE_URL,echo=False)
 
@@ -74,7 +77,7 @@ async def test_register(client):
     print("1. Registering User A")
     response = await client.post("/registerUser", json= {
         "email": "maksym@test.com",
-        "password": "TestPass123"
+        "password": "Test!Pass_123"
     })
     assert response.status_code == 200
     response = response.json()
@@ -84,7 +87,7 @@ async def test_register(client):
     print("2. Registering User B")
     response = await client.post("/registerUser", json= {
         "email": "angelika@test.com",
-        "password": "TestPass123"
+        "password": "Test!Pass_123"
     })
     assert response.status_code == 200
     response = response.json()
@@ -130,7 +133,7 @@ async def test_duplicate_email(client):
     print("Negative Test: Trying to register with duplicate email should return 409")
     response = await client.post("/registerUser", json={
         "email": "maksym@test.com",
-        "password": "TestPass123"
+        "password": "Test!Pass_123"
     })
     assert response.status_code == 409
 
@@ -609,7 +612,7 @@ async def test_messaging(client):
     print("5. Register User C (no Quick Picks with A)")
     response = await client.post("/registerUser", json={
         "email": "charlie@test.com",
-        "password": "TestPass123"
+        "password": "Test!Pass_123"
     })
     assert response.status_code == 200
     state["token_C"] = response.json()["access_token"]

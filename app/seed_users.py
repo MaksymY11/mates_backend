@@ -7,7 +7,7 @@ clustering algorithm enough data for meaningful neighborhoods.
 
 Run with:  python -m app.seed_users
 
-All users have password: TestPass123
+All users have password: Test!Pass_123
 (meets frontend validation: 8+ chars, uppercase, lowercase, digit)
 """
 
@@ -31,7 +31,7 @@ from app.models import (
 from app.security import hash_password
 from app.vibe_engine import calculate_weights, weights_to_labels
 
-PASSWORD = "TestPass123"
+PASSWORD = "Test!Pass_123"
 
 # Each archetype: name, email, bio, and furniture names to place
 ARCHETYPES = [
