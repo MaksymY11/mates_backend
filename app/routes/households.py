@@ -16,7 +16,7 @@ from app.models import (
     conversation_participants,
 )
 from app.deps import require_verified_user
-from app.notifications import create_notification
+from app.notify import create_notification
 from datetime import datetime, timezone, timedelta
 
 router = APIRouter(tags=["households"])

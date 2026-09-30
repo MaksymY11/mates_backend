@@ -13,7 +13,7 @@ from app.models import (
     preference_profiles,
 )
 from app.deps import require_verified_user
-from app.notifications import create_notification
+from app.notify import create_notification
 from datetime import datetime, timezone
 import random
 

@@ -66,12 +66,15 @@ def _location_matches(my_loc: dict, their_city: str | None, their_state: str | N
     if pref == "anywhere":
         return True
     if pref == "same_state":
+        if not their_state: return False
         return my_loc["state"].lower() == their_state.lower()
-    # same_city (default)
-    return (
-        my_loc["city"].lower() == their_city.lower()
-        and my_loc["state"].lower() == their_state.lower()
-    )
+    if pref == "same_city":
+        if not their_state or not their_city: return False
+        return (
+            my_loc["city"].lower() == their_city.lower()
+            and my_loc["state"].lower() == their_state.lower()
+        )
+    return False
 
 
 async def _run_clustering(db: AsyncSession) -> None:

@@ -12,7 +12,7 @@ from app.models import (
 )
 from app.deps import require_verified_user
 from app.auth import verify_access_token
-from app.notifications import create_notification
+from app.notify import create_notification
 from datetime import datetime, timezone
 import json
 import asyncio
