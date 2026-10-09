@@ -48,10 +48,13 @@ router = APIRouter()
 @router.post("/registerUser")
 @limiter.limit("5/15minutes")
 async def register_user(request: Request, user: UserRegister, db: AsyncSession = Depends(get_db)):
-    """Register a new user. If the email is already registered and verified, returns 409. If it belongs to an                                                                                                                                                                  
-    abandoned unverified account, the old row (and its cascaded tokens) is deleted and replaced, letting the user                                                                                                                                                             
-    start over without a confusing 409. Stale verification codes are cleared explicitly (no FK cascade). Returns                                                                                                                                                             
-    access + refresh tokens plus the email_verified flag, and sends a verification email unless SKIP_EMAIL_VERIFICATION is set."""
+    """
+    - Register a new user.
+    - If the email is already registered and verified, returns 409.
+    - If it belongs to an abandoned unverified account, the old row (and its cascaded tokens) is deleted and replaced, letting the user start over without a confusing 409.
+    - Stale verification codes are cleared explicitly (no FK cascade).
+    - Returns access + refresh tokens plus the email_verified flag, and sends a verification email unless SKIP_EMAIL_VERIFICATION is set.
+    """
 
     skip = os.getenv("SKIP_EMAIL_VERIFICATION", "").lower() == "true"
 
@@ -146,7 +149,9 @@ async def register_user(request: Request, user: UserRegister, db: AsyncSession =
 @router.post("/loginUser")
 @limiter.limit("5/15minutes")
 async def login_user(request: Request, user: UserLogin, db: AsyncSession = Depends(get_db)):
-    """Authenticate credentials and return access + refresh tokens plus email_verified flag (frontend gates on this)."""
+    """
+    - Authenticate credentials and return access + refresh tokens plus email_verified flag (frontend gates on this).
+    """
 
     result = await db.execute(
         select(users)
@@ -185,7 +190,10 @@ async def login_user(request: Request, user: UserLogin, db: AsyncSession = Depen
 @router.post("/refreshToken")
 @limiter.limit("10/15minutes")
 async def refresh_token(request: Request, body: RefreshRequest, db: AsyncSession = Depends(get_db)):
-    """Exchange a valid refresh token for a new access + refresh token pair. Old token is consumed."""
+    """
+    - Exchange a valid refresh token for a new access + refresh token pair.
+    - Old token is consumed.
+    """
 
     r_token = body.refresh_token
     
@@ -217,7 +225,9 @@ async def refresh_token(request: Request, body: RefreshRequest, db: AsyncSession
 @router.post("/logout")
 @limiter.limit("5/15minutes")
 async def logout(request: Request, body: RefreshRequest, db: AsyncSession = Depends(get_db)):
-    """Invalidate the provided refresh token."""
+    """
+    - Invalidate the provided refresh token.
+    """
 
     r_token = body.refresh_token
     await db.execute(
@@ -229,7 +239,9 @@ async def logout(request: Request, body: RefreshRequest, db: AsyncSession = Depe
 # Returning logged-in user's profile data
 @router.get("/me")
 async def get_me(payload: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    """Return the authenticated user's profile (excludes password hash)."""
+    """
+    - Return the authenticated user's profile (excludes password hash).
+    """
     
     email = payload["email"]
     result = await db.execute(select(users).where(users.c.email == email))
@@ -243,13 +255,14 @@ async def get_me(payload: dict = Depends(get_current_user), db: AsyncSession = D
     
 @router.post("/updateUser")
 async def update_user(
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     data: dict = Body(...),
     db: AsyncSession = Depends(get_db)
 ):
-    """Update the authenticated user's profile. Unknown or disallowed fields are silently dropped (allowlist enforced server-side)."""
-
-    email = payload["email"]
+    """
+    - Update the authenticated user's profile.
+    - Unknown or disallowed fields are silently dropped (allowlist enforced server-side).
+    """
 
     # filter allowed fields
     allowed = {"name", "city", "bio", "age", "state", "budget", "move_in_date", "lifestyle", "activities", "prefs", "location_preference"}
@@ -268,7 +281,7 @@ async def update_user(
         raise HTTPException(status_code=400, detail="No valid fields to update")
 
     await db.execute(
-        update(users).where(users.c.email == email).values(**update_data)
+        update(users).where(users.c.id == me).values(**update_data)
     )
     await db.commit()
     return {"detail": "Profile updated successfully"}
@@ -276,10 +289,13 @@ async def update_user(
 @router.post("/uploadAvatar")
 async def upload_avatar_endpoint(
     file: UploadFile = File(...),
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Upload and validate an avatar image. Converts to JPEG, generates a thumbnail, and uploads both to S3."""
+    """
+    - Upload and validate an avatar image.
+    - Converts to JPEG, generates a thumbnail, and uploads both to S3.
+    """
 
     if file.content_type not in ("image/jpeg", "image/png", "image/gif"):
         raise HTTPException(status_code=400, detail="Unsupported image type")
@@ -303,17 +319,13 @@ async def upload_avatar_endpoint(
     except Exception:
         raise HTTPException(status_code=400, detail="Uploaded file is not a valid image")
 
-    email = payload["email"]
-    result = await db.execute(select(users).where(users.c.email == email))
-    row = result.fetchone()
-
     avatar_url, thumb_url = await asyncio.gather(
-        upload_avatar(row.id, full_bytes),
-        upload_avatar(row.id, thumb_bytes, suffix="_thumb"),
+        upload_avatar(me, full_bytes),
+        upload_avatar(me, thumb_bytes, suffix="_thumb"),
     )
 
     await db.execute(
-        update(users).where(users.c.email == email).values(
+        update(users).where(users.c.id == me).values(
             avatar_url=avatar_url,
             avatar_thumb_url=thumb_url,
         )

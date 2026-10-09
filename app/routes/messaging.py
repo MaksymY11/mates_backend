@@ -55,15 +55,6 @@ manager = ConnectionManager()
 
 # ── Helpers ─────────────────────────────────────────────────────
 
-async def _resolve_user_id(db: AsyncSession, payload: dict) -> int:
-    email = payload["email"]
-    result = await db.execute(select(users.c.id).where(users.c.email == email))
-    record = result.fetchone()
-    if not record:
-        raise HTTPException(status_code=404, detail="User not found")
-    return record.id
-
-
 async def _has_completed_session(db: AsyncSession, user_a: int, user_b: int) -> bool:
     a, b = min(user_a, user_b), max(user_a, user_b)
     result = await db.execute(
@@ -323,11 +314,12 @@ async def _handle_ws_read(user_id: int, data: dict):
 
 @router.get("/conversations")
 async def list_conversations(
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List user's conversations with last message and unread count."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - List user's conversations with last message and unread count.
+    """
 
     # Get all conversation IDs for this user
     result = await db.execute(
@@ -433,11 +425,13 @@ async def get_messages(
     conversation_id: int,
     before: int | None = None,
     limit: int = 50,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Cursor-paginated message history. Ordered by created_at ASC."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - Cursor-paginated message history.
+    - Ordered by created_at ASC.
+    """
 
     # Verify participant
     participant_ids = await _get_participant_ids(db, conversation_id)
@@ -485,11 +479,13 @@ async def get_messages(
 @router.post("/conversations/dm/{user_id}")
 async def create_dm(
     user_id: int,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create or return existing DM conversation. Requires completed Quick Picks."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - Create or return existing DM conversation.
+    - Requires completed Quick Picks.
+    """
 
     if me == user_id:
         raise HTTPException(status_code=400, detail="Cannot message yourself")
@@ -563,11 +559,12 @@ async def create_dm(
 @router.post("/conversations/{conversation_id}/read")
 async def mark_read(
     conversation_id: int,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Mark conversation as read for current user."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - Mark conversation as read for current user.
+    """
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     result = await db.execute(

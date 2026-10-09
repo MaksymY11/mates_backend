@@ -16,21 +16,11 @@ from datetime import datetime, timezone
 router = APIRouter(prefix="/vibe", tags=["vibe"])
 
 
-# ── Helpers ──────────────────────────────────────────────────────
-
-async def _resolve_user_id(db: AsyncSession, payload: dict) -> int:
-    email = payload["email"]
-    result = await db.execute(select(users.c.id).where(users.c.email == email))
-    row = result.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="User not found")
-    return row.id
-
-
 async def recalculate_vibe(db: AsyncSession, user_id: int, *, commit: bool = True) -> dict:
     """
-    Recalculate a user's vibe profile from their placed apartment items.
-    Upserts the preference_profiles row. Returns the profile dict.
+    - Recalculate a user's vibe profile from their placed apartment items.
+    - Upserts the preference_profiles row.
+    - Returns the profile dict.
     """
     # Get the user's apartment
     result = await db.execute(
@@ -86,7 +76,9 @@ async def recalculate_vibe(db: AsyncSession, user_id: int, *, commit: bool = Tru
 
 
 async def _get_profile(db: AsyncSession, user_id: int) -> dict:
-    """Get a user's vibe profile, recalculating if it doesn't exist."""
+    """
+    - Get a user's vibe profile, recalculating if it doesn't exist.
+    """
     result = await db.execute(
         select(preference_profiles).where(
             preference_profiles.c.user_id == user_id
@@ -108,26 +100,29 @@ async def _get_profile(db: AsyncSession, user_id: int) -> dict:
 
 @router.get("/me")
 async def get_my_vibe(
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Current user's vibe profile. Recalculates if stale or missing."""
-    user_id = await _resolve_user_id(db, payload)
-    return await _get_profile(db, user_id)
+    """
+    - Current user's vibe profile.
+    - Recalculates if stale or missing.
+    """
+    return await _get_profile(db, me)
 
 
 @router.get("/compare/{user_id}")
 async def compare_vibe(
     user_id: int,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Compare current user's vibe with another user's."""
-    my_user_id = await _resolve_user_id(db, payload)
-    if my_user_id == user_id:
+    """
+    - Compare current user's vibe with another user's.
+    """
+    if me == user_id:
         raise HTTPException(status_code=400, detail="Cannot compare with yourself")
 
-    my_profile = await _get_profile(db, my_user_id)
+    my_profile = await _get_profile(db, me)
     their_profile = await _get_profile(db, user_id)
 
     comparison = compare_profiles(
@@ -145,10 +140,12 @@ async def compare_vibe(
 @router.get("/{user_id}")
 async def get_user_vibe(
     user_id: int,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Another user's vibe profile."""
+    """
+    - Another user's vibe profile.
+    """
     # Verify user exists
     result = await db.execute(select(users.c.id).where(users.c.id == user_id))
     if not result.fetchone():
@@ -158,9 +155,10 @@ async def get_user_vibe(
 
 @router.post("/recalculate")
 async def force_recalculate(
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Force recalculation of current user's vibe profile."""
-    user_id = await _resolve_user_id(db, payload)
-    return await recalculate_vibe(db, user_id)
+    """
+    - Force recalculation of current user's vibe profile.
+    """
+    return await recalculate_vibe(db, me)

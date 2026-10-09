@@ -1,415 +1,245 @@
-from fastapi import Depends, APIRouter, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, insert, update, func
-from app.database import get_db
-from app.models import (
-    users,
-    scenarios,
-    scenario_responses,
-    daily_scenario_assignments,
-)
+from fastapi import APIRouter, Depends, HTTPException
 from app.deps import require_verified_user
+from app.database import get_db
+from app.models import scenarios, scenario_responses, daily_scenario_assignments
+from app.security import now
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, insert, update, and_, or_, func
 from pydantic import BaseModel
-from datetime import datetime, timezone, date
-from typing import Optional
-
-router = APIRouter(prefix="/scenarios", tags=["scenarios"])
+from typing import Literal
 
 MAX_ACTIVE_RESPONSES = 3
+router = APIRouter(prefix="/scenarios", tags=["scenarios"])
 
-
-# ── Request schemas ──────────────────────────────────────────────
-
-class AnswerRequest(BaseModel):
+class AnswerRequest(BaseModel): 
     scenario_id: int
-    selected_option: str
-    replace_scenario_id: Optional[int] = None
+    selected_option: Literal["a","b","c","d"]
+    replace_scenario_id: int | None = None
 
 
-# ── Helpers ──────────────────────────────────────────────────────
+async def _get_active_scenarios(db: AsyncSession, me: int) -> list[dict]:
+    """
+    Return a user's active answers, oldest first, with option ids resolved to text.
 
-async def _resolve_user_id(db: AsyncSession, payload: dict) -> int:
-    email = payload["email"]
-    result = await db.execute(select(users.c.id).where(users.c.email == email))
-    row = result.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="User not found")
-    return row.id
-
-
-async def _get_current_responses(db: AsyncSession, user_id: int) -> list[dict]:
-    """Get the user's current scenario responses with scenario details."""
-    result = await db.execute(
-        select(
-            scenario_responses.c.id,
-            scenario_responses.c.scenario_id,
-            scenario_responses.c.selected_option,
-            scenario_responses.c.answered_at,
-            scenarios.c.prompt,
-            scenarios.c.options,
-        )
-        .join(scenarios, scenario_responses.c.scenario_id == scenarios.c.id)
-        .where(
-            scenario_responses.c.user_id == user_id,
-            scenario_responses.c.active == True,
-        )
-        .order_by(scenario_responses.c.answered_at.asc())
+    Args:
+        db: Database session.
+        me: user's id.
+    
+    Returns:
+        A list of response dicts.
+    """
+    result_answered = await db.execute(
+        select(scenario_responses.c.scenario_id, scenario_responses.c.selected_option, 
+               scenarios.c.prompt, scenarios.c.options)
+        .select_from(scenario_responses.join(scenarios, scenario_responses.c.scenario_id == scenarios.c.id))
+        .where(scenario_responses.c.user_id == me, scenario_responses.c.active.is_(True))
+        .order_by(scenario_responses.c.answered_at)
     )
-    rows = result.fetchall()
+    rows = result_answered.fetchall()
 
-    responses = []
-    for row in rows:
-        options = row.options or []
+    current_responses = []
+    for r in rows:
         selected_text = None
-        for opt in options:
-            if opt["id"] == row.selected_option:
+        for opt in r.options:
+            if opt["id"] == r.selected_option:
                 selected_text = opt["text"]
                 break
+        current_response = {
+            "scenario_id": r.scenario_id,
+            "prompt": r.prompt,
+            "selected_text": selected_text
+        }
+        current_responses.append(current_response)
 
-        responses.append({
-            "response_id": row.id,
-            "scenario_id": row.scenario_id,
-            "prompt": row.prompt,
-            "options": options,
-            "selected_option": row.selected_option,
-            "selected_text": selected_text,
-            "answered_at": row.answered_at.isoformat() if row.answered_at else None,
-        })
+    return current_responses
 
-    return responses
-
-
-# ── Endpoints ────────────────────────────────────────────────────
 
 @router.get("/daily")
-async def get_daily_scenario(
-    payload: dict = Depends(require_verified_user),
-    db: AsyncSession = Depends(get_db),
+async def get_daily(
+    me: int = Depends(require_verified_user),
+    db: AsyncSession = Depends(get_db)
 ):
     """
-    Get today's scenario for the current user.
-    Auto-assigns an unanswered scenario if none assigned for today.
+    Gets/Assigns user's daily scenario. Returns the scenario assigned + a list of dicts with user's active scenarios.
 
-    If user has >= 3 responses, returns requires_substitution=True along
-    with their current responses so they can pick which to replace.
+    - If no daily scenario is assigned, picks one from unanswered scenarios.
+    - If no unanaswered scenarios exist picks the oldest answered scenario.
     """
-    user_id = await _resolve_user_id(db, payload)
-    today = date.today()
 
-    current_responses = await _get_current_responses(db, user_id)
-    response_count = len(current_responses)
-    requires_substitution = response_count >= MAX_ACTIVE_RESPONSES
-
-    # Check for an existing assignment today
-    result = await db.execute(
-        select(daily_scenario_assignments).where(
-            daily_scenario_assignments.c.user_id == user_id,
-            daily_scenario_assignments.c.assigned_date == today,
-        )
+    # Check if today's scenario has been assigned
+    result_assigned = await db.execute(
+        select(daily_scenario_assignments)
+        .where(daily_scenario_assignments.c.user_id == me, daily_scenario_assignments.c.assigned_date == now().date())
     )
-    assignment = result.fetchone()
+    assigned = result_assigned.fetchone()
 
-    if assignment:
-        if assignment.completed:
-            return {
-                "scenario": None,
-                "completed_today": True,
-                "response_count": response_count,
-                "requires_substitution": False,
-                "current_responses": current_responses,
-            }
-        # Fetch the assigned scenario
+    if not assigned:
+        # Selects scenario_id. For further explanation how this call works refer to notes "The abominable call".
         result = await db.execute(
-            select(scenarios).where(scenarios.c.id == assignment.scenario_id)
+            select(scenarios.c.id)
+            .outerjoin(scenario_responses, and_(
+                scenarios.c.id == scenario_responses.c.scenario_id,     # how the rows match
+                scenario_responses.c.user_id == me                      # which rows are allowed to match
+            ))
+            .where(or_(scenario_responses.c.answered_at.is_(None), scenario_responses.c.active.is_(False)))     # never answered row has answered_at as NULL
+            .order_by(scenario_responses.c.answered_at.asc().nulls_first(), func.random())      # order by answered ascending, nulls first, then randomize the nulls
+            .limit(1)
         )
-        scenario = result.fetchone()
-        if scenario:
-            return {
-                "scenario": _format_scenario(scenario),
-                "completed_today": False,
-                "response_count": response_count,
-                "requires_substitution": requires_substitution,
-                "current_responses": current_responses if requires_substitution else [],
-            }
+        scenario_to_insert = result.fetchone()
 
-    # No assignment today — pick a random scenario the user hasn't answered
-    # Exclude both current responses AND any previously answered-then-replaced
-    answered_subq = (
-        select(scenario_responses.c.scenario_id)
-        .where(scenario_responses.c.user_id == user_id)
-    )
+        # Assign the scenario
+        result = await db.execute(
+            insert(daily_scenario_assignments)
+            .values(
+                user_id=me,
+                scenario_id=scenario_to_insert.id,
+                assigned_date=now().date(),
+            )
+            .returning(daily_scenario_assignments.c.scenario_id, daily_scenario_assignments.c.completed)
+        )
+        assigned = result.fetchone()
+        await db.commit()
+
+    # Get scenario
     result = await db.execute(
-        select(scenarios)
-        .where(
-            scenarios.c.active == True,
-            scenarios.c.id.notin_(answered_subq),
-        )
-        .order_by(func.random())
-        .limit(1)
+        select(scenarios.c.id, scenarios.c.prompt, scenarios.c.options)
+        .where(scenarios.c.id == assigned.scenario_id)
     )
-    scenario = result.fetchone()
-
-    if not scenario:
-        return {
-            "scenario": None,
-            "completed_today": False,
-            "all_answered": True,
-            "response_count": response_count,
-            "requires_substitution": False,
-            "current_responses": current_responses,
-        }
-
-    # Create today's assignment
-    await db.execute(
-        insert(daily_scenario_assignments).values(
-            user_id=user_id,
-            scenario_id=scenario.id,
-            assigned_date=today,
-            completed=False,
-        )
-    )
-    await db.commit()
-
-    return {
-        "scenario": _format_scenario(scenario),
-        "completed_today": False,
-        "response_count": response_count,
-        "requires_substitution": requires_substitution,
-        "current_responses": current_responses if requires_substitution else [],
+    row = result.fetchone()
+    scenario = {
+        "id": row.id,
+        "prompt": row.prompt,
+        "options": row.options
     }
 
+    current_responses = await _get_active_scenarios(db, me)
+    requires_substitution = len(current_responses) >= MAX_ACTIVE_RESPONSES
+
+    return {
+        "scenario": scenario,
+        "completed_today": assigned.completed,
+        "requires_substitution": requires_substitution,
+        "current_responses": current_responses
+    }
 
 @router.post("/answer")
 async def answer_scenario(
     body: AnswerRequest,
-    payload: dict = Depends(require_verified_user),
-    db: AsyncSession = Depends(get_db),
+    me: int = Depends(require_verified_user),
+    db: AsyncSession = Depends(get_db)
 ):
     """
-    Record the user's answer to a scenario.
+    Records user's answer to today's assigned scenario.
 
-    If user already has 3 responses, replace_scenario_id must be provided
-    to specify which existing response to remove.
+    - At MAX_ACTIVE_RESPONSES must include `replace_scenario_id`, naming one of them to retire.
+    - raises 400: nothing assigned today, `replace_scenario_id` is missing, invalid, or sent below the limit.
+    - raises 409: not today's scenario, today's scenario was already answered.
     """
-    user_id = await _resolve_user_id(db, payload)
-
-    # Validate scenario exists
+    # Check that scenario_id matches the one assigned & that user is not answering the same scenario twice.
     result = await db.execute(
-        select(scenarios).where(scenarios.c.id == body.scenario_id)
+        select(daily_scenario_assignments.c.scenario_id, daily_scenario_assignments.c.completed)
+        .where(daily_scenario_assignments.c.user_id == me, daily_scenario_assignments.c.assigned_date == now().date())
     )
-    scenario = result.fetchone()
-    if not scenario:
-        raise HTTPException(status_code=404, detail="Scenario not found")
+    assigned = result.fetchone()
+    if not assigned:
+        raise HTTPException(status_code=400, detail="Daily scenario is not assigned.")
+    elif assigned.scenario_id != body.scenario_id:
+        raise HTTPException(status_code=409, detail="Can't answer a scenario other than the one assigned.")
+    if assigned.completed == True:
+        raise HTTPException(status_code=409, detail="Daily scenario has already been answered.")
 
-    # Validate option exists
-    options = scenario.options or []
-    valid_ids = [o["id"] for o in options]
-    if body.selected_option not in valid_ids:
-        raise HTTPException(status_code=400, detail="Invalid option")
-
-    # Check for duplicate active response
+    # Check that passed replace_scenario_id is present if user has three responses.
     result = await db.execute(
-        select(scenario_responses).where(
-            scenario_responses.c.user_id == user_id,
-            scenario_responses.c.scenario_id == body.scenario_id,
-            scenario_responses.c.active == True,
-        )
+        select(scenarios.c.id)
+        .select_from(scenario_responses.join(scenarios, scenarios.c.id == scenario_responses.c.scenario_id))
+        .where(scenario_responses.c.user_id == me, scenario_responses.c.active.is_(True))
     )
-    if result.fetchone():
-        raise HTTPException(status_code=409, detail="Already answered this scenario")
+    active_ids = [row.id for row in result.fetchall()]
+    if not body.replace_scenario_id and len(active_ids) >= MAX_ACTIVE_RESPONSES:
+        raise HTTPException(status_code=400, detail="Need replace_scenario_id when user has 3 active responses.")
 
-    # Check current active response count
+    # Check if we're recycling a scenario: a case where user has answered all scenarios and /daily assigns the oldest scenario answered.
     result = await db.execute(
-        select(func.count())
-        .select_from(scenario_responses)
-        .where(
-            scenario_responses.c.user_id == user_id,
-            scenario_responses.c.active == True,
-        )
+        select(scenario_responses.c.id)
+        .where(scenario_responses.c.user_id == me, scenario_responses.c.scenario_id == body.scenario_id)
     )
-    count = result.scalar()
+    recycle = result.fetchone() is not None
 
-    if count >= MAX_ACTIVE_RESPONSES:
-        if body.replace_scenario_id is None:
-            raise HTTPException(
-                status_code=400,
-                detail="You have 3 active responses. Provide replace_scenario_id to swap one out.",
-            )
-        # Deactivate the response being replaced
-        result = await db.execute(
+    if body.replace_scenario_id is not None:
+        if body.replace_scenario_id not in active_ids:
+            raise HTTPException(status_code=400, detail="scenario_id to be replaced doesn't match any existing active scenario_ids")
+        elif len(active_ids) < MAX_ACTIVE_RESPONSES:
+            raise HTTPException(status_code=400, detail=f"Can't pass replace_scenario_id when current response limit is not reached: ({len(active_ids)}/3)")
+
+        # Update the active column of id to be replaced to false.
+        await db.execute(
             update(scenario_responses)
-            .where(
-                scenario_responses.c.user_id == user_id,
-                scenario_responses.c.scenario_id == body.replace_scenario_id,
-                scenario_responses.c.active == True,
-            )
-            .values(active=False)
+            .where(scenario_responses.c.user_id == me, scenario_responses.c.scenario_id == body.replace_scenario_id)
+            .values(active = False)
         )
-        if result.rowcount == 0:
-            raise HTTPException(
-                status_code=404,
-                detail="Response to replace not found",
+
+    # If it's a recycled scenario we need to update existing scenario rather than inserting.
+    if recycle:
+        await db.execute(
+            update(scenario_responses)
+            .where(scenario_responses.c.scenario_id == body.scenario_id, scenario_responses.c.user_id == me)
+            .values(
+                selected_option = body.selected_option,
+                answered_at = now(),
+                active = True,
             )
-
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-
-    # Record the new response
-    await db.execute(
-        insert(scenario_responses).values(
-            user_id=user_id,
-            scenario_id=body.scenario_id,
-            selected_option=body.selected_option,
-            answered_at=now,
         )
-    )
-
-    # Mark daily assignment as completed
-    today = date.today()
+    else:
+        # Insert the new scenario as active
+        await db.execute(
+            insert(scenario_responses)
+            .values(
+                user_id = me,
+                scenario_id = body.scenario_id,
+                selected_option = body.selected_option,
+                answered_at = now(),
+                active = True,
+            )
+        )
     await db.execute(
         update(daily_scenario_assignments)
-        .where(
-            daily_scenario_assignments.c.user_id == user_id,
-            daily_scenario_assignments.c.scenario_id == body.scenario_id,
-            daily_scenario_assignments.c.assigned_date == today,
-        )
-        .values(completed=True)
+        .where(daily_scenario_assignments.c.user_id == me, daily_scenario_assignments.c.assigned_date == now().date())
+        .values(completed = True)
     )
-
     await db.commit()
 
-    return {"detail": "Answer recorded", "scenario_id": body.scenario_id}
-
+    return {"detail": "Answer has been recorded."}
 
 @router.post("/skip")
 async def skip_scenario(
-    payload: dict = Depends(require_verified_user),
-    db: AsyncSession = Depends(get_db),
+    me: int = Depends(require_verified_user),
+    db: AsyncSession = Depends(get_db)
 ):
     """
-    Skip today's scenario without answering (keep current 3 responses).
-    Marks today's daily assignment as completed.
+    - Skips daily scenario by marking it as completed.
     """
-    user_id = await _resolve_user_id(db, payload)
-    today = date.today()
-
-    result = await db.execute(
+    await db.execute(
         update(daily_scenario_assignments)
-        .where(
-            daily_scenario_assignments.c.user_id == user_id,
-            daily_scenario_assignments.c.assigned_date == today,
-        )
-        .values(completed=True)
+        .where(daily_scenario_assignments.c.user_id == me, daily_scenario_assignments.c.assigned_date == now().date())
+        .values(completed = True)
     )
-
-    if result.rowcount == 0:
-        raise HTTPException(status_code=404, detail="No scenario assigned today")
-
     await db.commit()
 
-    return {"detail": "Scenario skipped"}
+    return {"detail": "Scenario has been skipped."}
 
-
-@router.get("/history")
-async def get_history(
-    payload: dict = Depends(require_verified_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Current user's active scenario responses (max 3)."""
-    user_id = await _resolve_user_id(db, payload)
-    responses = await _get_current_responses(db, user_id)
-    return {"responses": responses}
-
-
-@router.get("/compare/{user_id}")
-async def compare_scenarios(
+@router.get("/history/{user_id}")
+async def history_scenarios(
     user_id: int,
-    payload: dict = Depends(require_verified_user),
-    db: AsyncSession = Depends(get_db),
+    me: int = Depends(require_verified_user),
+    db: AsyncSession = Depends(get_db)
 ):
     """
-    Compare scenario answers with another user.
-    Only returns scenarios both users have answered (slow reveal).
+    Takes user_id and returns their current responses. Returns an empty list if user does not exist.
+    
+    - "me" is unused, but kept for verification purposes.
     """
-    my_user_id = await _resolve_user_id(db, payload)
-    if my_user_id == user_id:
-        raise HTTPException(status_code=400, detail="Cannot compare with yourself")
-
-    # Get my active responses
-    result = await db.execute(
-        select(scenario_responses.c.scenario_id, scenario_responses.c.selected_option)
-        .where(
-            scenario_responses.c.user_id == my_user_id,
-            scenario_responses.c.active == True,
-        )
-    )
-    my_responses = {row.scenario_id: row.selected_option for row in result.fetchall()}
-
-    # Get their active responses
-    result = await db.execute(
-        select(scenario_responses.c.scenario_id, scenario_responses.c.selected_option)
-        .where(
-            scenario_responses.c.user_id == user_id,
-            scenario_responses.c.active == True,
-        )
-    )
-    their_responses = {row.scenario_id: row.selected_option for row in result.fetchall()}
-
-    # Find shared scenarios
-    shared_ids = set(my_responses.keys()) & set(their_responses.keys())
-    if not shared_ids:
-        return {"comparisons": [], "shared_count": 0}
-
-    # Fetch scenario details
-    result = await db.execute(
-        select(scenarios).where(scenarios.c.id.in_(shared_ids))
-    )
-    scenario_map = {row.id: row for row in result.fetchall()}
-
-    comparisons = []
-    for sid in shared_ids:
-        scenario = scenario_map.get(sid)
-        if not scenario:
-            continue
-
-        options = scenario.options or []
-        my_option = my_responses[sid]
-        their_option = their_responses[sid]
-
-        my_text = None
-        their_text = None
-        for opt in options:
-            if opt["id"] == my_option:
-                my_text = opt["text"]
-            if opt["id"] == their_option:
-                their_text = opt["text"]
-
-        agreed = my_option == their_option
-        conversation_starter = None
-        if not agreed:
-            conversation_starter = (
-                "You answered differently on this one — "
-                "great chance to share your perspectives!"
-            )
-
-        comparisons.append({
-            "scenario_id": sid,
-            "prompt": scenario.prompt,
-            "my_answer": my_text,
-            "their_answer": their_text,
-            "agreed": agreed,
-            "conversation_starter": conversation_starter,
-        })
+    current_responses = await _get_active_scenarios(db, user_id)
 
     return {
-        "comparisons": comparisons,
-        "shared_count": len(comparisons),
-    }
-
-
-def _format_scenario(scenario) -> dict:
-    """Format a scenario row for API response."""
-    return {
-        "id": scenario.id,
-        "prompt": scenario.prompt,
-        "options": scenario.options or [],
+        "responses": current_responses
     }

@@ -3,7 +3,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, insert, delete
 from app.database import get_db
 from app.models import (
-    users,
     furniture_catalog,
     room_style_presets,
     apartments,
@@ -34,7 +33,9 @@ class PlaceItemRequest(BaseModel):
 # ── Helpers ──────────────────────────────────────────────────────
 
 async def _get_or_404_apartment(db: AsyncSession, user_id: int):
-    """Return the apartment row for a user, or raise 404."""
+    """
+    - Return the apartment row for a user, or raise 404.
+    """
     result = await db.execute(
         select(apartments).where(apartments.c.user_id == user_id)
     )
@@ -44,18 +45,10 @@ async def _get_or_404_apartment(db: AsyncSession, user_id: int):
     return apt
 
 
-async def _resolve_user_id(db: AsyncSession, payload: dict) -> int:
-    """Get the users.id from the JWT email claim."""
-    email = payload["email"]
-    result = await db.execute(select(users.c.id).where(users.c.email == email))
-    row = result.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="User not found")
-    return row.id
-
-
 async def _apartment_with_items(db: AsyncSession, apt):
-    """Return a dict of an apartment plus its placed items."""
+    """
+    - Return a dict of an apartment plus its placed items.
+    """
     items_result = await db.execute(
         select(apartment_items).where(
             apartment_items.c.apartment_id == apt.id
@@ -75,7 +68,9 @@ async def _apartment_with_items(db: AsyncSession, apt):
 
 @router.get("/catalog")
 async def get_catalog(db: AsyncSession = Depends(get_db)):
-    """All furniture grouped by zone → category."""
+    """
+    - All furniture grouped by zone → category.
+    """
     result = await db.execute(select(furniture_catalog))
     rows = [dict(r._mapping) for r in result.fetchall()]
 
@@ -87,7 +82,9 @@ async def get_catalog(db: AsyncSession = Depends(get_db)):
 
 @router.get("/presets")
 async def get_presets(db: AsyncSession = Depends(get_db)):
-    """All style presets grouped by zone."""
+    """
+    - All style presets grouped by zone.
+    """
     result = await db.execute(select(room_style_presets))
     rows = [dict(r._mapping) for r in result.fetchall()]
 
@@ -99,15 +96,16 @@ async def get_presets(db: AsyncSession = Depends(get_db)):
 
 @router.post("/")
 async def create_apartment(
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create an apartment for the current user (idempotent)."""
-    user_id = await _resolve_user_id(db, payload)
+    """
+    - Create an apartment for the current user (idempotent).
+    """
 
     # Return existing apartment if one already exists
     result = await db.execute(
-        select(apartments).where(apartments.c.user_id == user_id)
+        select(apartments).where(apartments.c.user_id == me)
     )
     existing = result.fetchone()
     if existing:
@@ -116,13 +114,13 @@ async def create_apartment(
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     await db.execute(
         insert(apartments).values(
-            user_id=user_id, created_at=now, updated_at=now
+            user_id=me, created_at=now, updated_at=now
         )
     )
     await db.commit()
 
     result = await db.execute(
-        select(apartments).where(apartments.c.user_id == user_id)
+        select(apartments).where(apartments.c.user_id == me)
     )
     apt = result.fetchone()
     return await _apartment_with_items(db, apt)
@@ -131,12 +129,13 @@ async def create_apartment(
 @router.post("/apply-preset")
 async def apply_preset(
     body: ApplyPresetRequest,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Apply a style preset to a zone — replaces all items in that zone."""
-    user_id = await _resolve_user_id(db, payload)
-    apt = await _get_or_404_apartment(db, user_id)
+    """
+    - Apply a style preset to a zone — replaces all items in that zone.
+    """
+    apt = await _get_or_404_apartment(db, me)
 
     # Fetch the preset
     result = await db.execute(
@@ -178,8 +177,8 @@ async def apply_preset(
         .values(updated_at=now)
     )
     # Recalculate vibe before committing (atomic transaction)
-    await recalculate_vibe(db, user_id, commit=False)
-    await invalidate_neighborhood(db, user_id)
+    await recalculate_vibe(db, me, commit=False)
+    await invalidate_neighborhood(db, me)
 
     await db.commit()
 
@@ -193,22 +192,25 @@ async def apply_preset(
 
 @router.get("/me")
 async def get_my_apartment(
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Current user's apartment + placed items."""
-    user_id = await _resolve_user_id(db, payload)
-    apt = await _get_or_404_apartment(db, user_id)
+    """
+    - Current user's apartment + placed items.
+    """
+    apt = await _get_or_404_apartment(db, me)
     return await _apartment_with_items(db, apt)
 
 
 @router.get("/{user_id}")
 async def get_user_apartment(
     user_id: int,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """View another user's apartment."""
+    """
+    - View another user's apartment.
+    """
     apt = await _get_or_404_apartment(db, user_id)
     return await _apartment_with_items(db, apt)
 
@@ -216,12 +218,14 @@ async def get_user_apartment(
 @router.post("/items")
 async def place_item(
     body: PlaceItemRequest,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Place a furniture item. Enforces constraint groups within a zone."""
-    user_id = await _resolve_user_id(db, payload)
-    apt = await _get_or_404_apartment(db, user_id)
+    """
+    - Place a furniture item.
+    - Enforces constraint groups within a zone.
+    """
+    apt = await _get_or_404_apartment(db, me)
 
     # Validate the furniture item exists
     result = await db.execute(
@@ -279,8 +283,8 @@ async def place_item(
         .values(updated_at=now)
     )
     # Recalculate vibe before committing (atomic transaction)
-    await recalculate_vibe(db, user_id, commit=False)
-    await invalidate_neighborhood(db, user_id)
+    await recalculate_vibe(db, me, commit=False)
+    await invalidate_neighborhood(db, me)
 
     await db.commit()
 
@@ -294,12 +298,14 @@ async def place_item(
 @router.delete("/items/{item_id}")
 async def remove_item(
     item_id: int,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Remove a placed item. Must belong to the current user's apartment."""
-    user_id = await _resolve_user_id(db, payload)
-    apt = await _get_or_404_apartment(db, user_id)
+    """
+    - Remove a placed item.
+    - Must belong to the current user's apartment.
+    """
+    apt = await _get_or_404_apartment(db, me)
 
     # Verify item belongs to this apartment
     result = await db.execute(
@@ -325,8 +331,8 @@ async def remove_item(
         .values(updated_at=now)
     )
     # Recalculate vibe before committing (atomic transaction)
-    await recalculate_vibe(db, user_id, commit=False)
-    await invalidate_neighborhood(db, user_id)
+    await recalculate_vibe(db, me, commit=False)
+    await invalidate_neighborhood(db, me)
 
     await db.commit()
 

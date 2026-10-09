@@ -22,20 +22,10 @@ router = APIRouter(tags=["quickpicks"])
 
 # ── Helpers ──────────────────────────────────────────────────────
 
-async def _resolve_user_id(db: AsyncSession, payload: dict) -> int:
-    email = payload["email"]
-    result = await db.execute(select(users.c.id).where(users.c.email == email))
-    row = result.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="User not found")
-    return row.id
-
-
 async def _create_session(db: AsyncSession, user_a_id: int, user_b_id: int) -> int:
-    """Create a Quick Picks session with 5 randomly selected questions.
-
-    Normalizes user pair so user_a_id < user_b_id to enforce the unique constraint
-    on unordered pairs.
+    """
+    - Create a Quick Picks session with 5 randomly selected questions.
+    - Normalizes user pair so user_a_id < user_b_id to enforce the unique constraint on unordered pairs.
     """
     # Normalize pair ordering
     a, b = min(user_a_id, user_b_id), max(user_a_id, user_b_id)
@@ -106,7 +96,9 @@ async def _create_session(db: AsyncSession, user_a_id: int, user_b_id: int) -> i
 
 
 async def _user_info(db: AsyncSession, user_id: int) -> dict:
-    """Compact user info for match listings."""
+    """
+    - Compact user info for match listings.
+    """
     result = await db.execute(
         select(users.c.id, users.c.name, users.c.avatar_url)
         .where(users.c.id == user_id)
@@ -135,11 +127,13 @@ async def _user_info(db: AsyncSession, user_id: int) -> dict:
 @router.post("/interest/{user_id}")
 async def express_interest(
     user_id: int,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Express interest in another user. If mutual, auto-creates a Quick Picks session."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - Express interest in another user.
+    - If mutual, auto-creates a Quick Picks session.
+    """
 
     if me == user_id:
         raise HTTPException(status_code=400, detail="Cannot express interest in yourself")
@@ -237,16 +231,14 @@ async def express_interest(
 @router.delete("/interest/{user_id}")
 async def withdraw_interest(
     user_id: int,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Withdraw interest in another user.
-
-    Deletes both directions (A→B and B→A) for a clean break — if they
-    want to match again, both need to wave fresh. Also deletes any
-    Quick Picks session between the pair (answers cascade-delete via FK).
     """
-    me = await _resolve_user_id(db, payload)
+    - Withdraw interest in another user.
+    - Deletes both directions (A→B and B→A) for a clean break — if they want to match again, both need to wave fresh.
+    - Also deletes any Quick Picks session between the pair (answers cascade-delete via FK).
+    """
 
     # Delete my interest in them
     result = await db.execute(
@@ -282,15 +274,13 @@ async def withdraw_interest(
 
 @router.get("/interest/sent")
 async def list_sent_interests(
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return all user IDs the current user has waved at.
-
-    Called once by the frontend to initialize wave button states
-    across all neighbor cards without N+1 API calls.
     """
-    me = await _resolve_user_id(db, payload)
+    - Return all user IDs the current user has waved at.
+    - Called once by the frontend to initialize wave button states across all neighbor cards without N+1 API calls.
+    """
     result = await db.execute(
         select(interests.c.to_user_id).where(interests.c.from_user_id == me)
     )
@@ -299,15 +289,13 @@ async def list_sent_interests(
 
 @router.get("/interest/mutual")
 async def list_mutual_interests(
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all mutual interests with Quick Picks session status.
-
-    Powers the Matches tab — shows users who've mutually waved,
-    along with the state of their Quick Picks session.
     """
-    me = await _resolve_user_id(db, payload)
+    - List all mutual interests with Quick Picks session status.
+    - Powers the Matches tab — shows users who've mutually waved, along with the state of their Quick Picks session.
+    """
 
     # Find users who I've expressed interest in AND who've expressed interest in me
     i_sent = select(interests.c.to_user_id).where(interests.c.from_user_id == me)
@@ -365,15 +353,14 @@ async def list_mutual_interests(
 @router.get("/quickpicks/session/{user_id}")
 async def get_session(
     user_id: int,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get the Quick Picks session between current user and target user.
-
-    Returns the 5 questions with full text plus the current user's answers so far.
-    Does NOT reveal the other user's answers until both are done (privacy).
     """
-    me = await _resolve_user_id(db, payload)
+    - Get the Quick Picks session between current user and target user.
+    - Returns the 5 questions with full text plus the current user's answers so far.
+    - Does NOT reveal the other user's answers until both are done (privacy).
+    """
     a, b = min(me, user_id), max(me, user_id)
 
     result = await db.execute(
@@ -426,15 +413,13 @@ async def get_session(
 @router.post("/quickpicks/answer")
 async def submit_answer(
     body: dict,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Record an answer to one Quick Picks question.
-
-    After the answering user submits all 5, updates the session status:
-    pending_both → pending_<other> if only one finished, completed if both done.
     """
-    me = await _resolve_user_id(db, payload)
+    - Record an answer to one Quick Picks question.
+    - After the answering user submits all 5, updates the session status: pending_both → pending_<other> if only one finished, completed if both done.
+    """
 
     session_id = body.get("session_id")
     question_index = body.get("question_index")
@@ -530,16 +515,14 @@ async def submit_answer(
 @router.get("/quickpicks/results/{session_id}")
 async def get_results(
     session_id: int,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Side-by-side results for a completed Quick Picks session.
-
-    Only available when both users have answered all 5 questions.
-    Returns each question with both answers, agreement flag, and
-    conversation starters for divergent answers.
     """
-    me = await _resolve_user_id(db, payload)
+    - Side-by-side results for a completed Quick Picks session.
+    - Only available when both users have answered all 5 questions.
+    - Returns each question with both answers, agreement flag, and conversation starters for divergent answers.
+    """
 
     result = await db.execute(
         select(quick_pick_sessions).where(quick_pick_sessions.c.id == session_id)

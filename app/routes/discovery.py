@@ -34,17 +34,10 @@ _clustering_lock = asyncio.Lock()
 
 # ── Helpers ──────────────────────────────────────────────────────
 
-async def _resolve_user_id(db: AsyncSession, payload: dict) -> int:
-    email = payload["email"]
-    result = await db.execute(select(users.c.id).where(users.c.email == email))
-    row = result.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="User not found")
-    return row.id
-
-
 async def _get_user_location(db: AsyncSession, user_id: int) -> dict:
-    """Get a user's city, state, and location_preference."""
+    """
+    - Get a user's city, state, and location_preference.
+    """
     result = await db.execute(
         select(users.c.city, users.c.state, users.c.location_preference)
         .where(users.c.id == user_id)
@@ -60,8 +53,10 @@ async def _get_user_location(db: AsyncSession, user_id: int) -> dict:
 
 
 def _location_matches(my_loc: dict, their_city: str | None, their_state: str | None) -> bool:
-    """Check if another user matches the current user's location preference.
-    Comparisons are case-insensitive to handle varied user input."""
+    """
+    - Check if another user matches the current user's location preference.
+    - Comparisons are case-insensitive to handle varied user input.
+    """
     pref = my_loc.get("location_preference", "same_city")
     if pref == "anywhere":
         return True
@@ -78,7 +73,9 @@ def _location_matches(my_loc: dict, their_city: str | None, their_state: str | N
 
 
 async def _run_clustering(db: AsyncSession) -> None:
-    """Run full clustering and persist results."""
+    """
+    - Run full clustering and persist results.
+    """
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # Fetch all preference profiles
@@ -151,14 +148,18 @@ async def _run_clustering(db: AsyncSession) -> None:
 
 
 async def invalidate_neighborhood(db: AsyncSession, user_id: int) -> None:
-    """Remove a user's neighborhood assignment so it reclusters on next visit."""
+    """
+    - Remove a user's neighborhood assignment so it reclusters on next visit.
+    """
     await db.execute(
         delete(neighborhood_members).where(neighborhood_members.c.user_id == user_id)
     )
 
 
 async def _ensure_clustering(db: AsyncSession, user_id: int) -> None:
-    """Trigger re-clustering if the user has no assignment or it's stale."""
+    """
+    - Trigger re-clustering if the user has no assignment or it's stale.
+    """
     result = await db.execute(
         select(neighborhood_members.c.assigned_at)
         .where(neighborhood_members.c.user_id == user_id)
@@ -189,8 +190,10 @@ async def _ensure_clustering(db: AsyncSession, user_id: int) -> None:
 
 
 async def _user_summaries(db: AsyncSession, member_rows) -> list[dict]:
-    """Batch-fetch user profiles with vibe data for a list of neighborhood members.
-       Returns a list of summary dicts with user info, vibe labels, and preference weights."""
+    """
+    - Batch-fetch user profiles with vibe data for a list of neighborhood members.
+    - Returns a list of summary dicts with user info, vibe labels, and preference weights.
+    """
 
     result = await db.execute(
         select(
@@ -224,22 +227,21 @@ async def _user_summaries(db: AsyncSession, member_rows) -> list[dict]:
 
 @router.get("/neighborhood")
 async def get_my_neighborhood(
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Current user's neighborhood: name, vibe_description, and list of neighbors.
-    Triggers re-clustering if assignment is missing or stale (>24h).
+    - Current user's neighborhood: name, vibe_description, and list of neighbors.
+    - Triggers re-clustering if assignment is missing or stale (>24h).
     """
-    user_id = await _resolve_user_id(db, payload)
-    await _ensure_clustering(db, user_id)
+    await _ensure_clustering(db, me)
 
     # Get user's neighborhood
     result = await db.execute(
         select(
             neighborhood_members.c.neighborhood_id,
             neighborhood_members.c.similarity_score,
-        ).where(neighborhood_members.c.user_id == user_id)
+        ).where(neighborhood_members.c.user_id == me)
     )
     membership = result.fetchone()
     if not membership:
@@ -256,11 +258,11 @@ async def get_my_neighborhood(
     # Get current user's weights and location for filtering + comparison
     result = await db.execute(
         select(preference_profiles.c.weights)
-        .where(preference_profiles.c.user_id == user_id)
+        .where(preference_profiles.c.user_id == me)
     )
     my_prof = result.fetchone()
     my_weights = (my_prof.weights if my_prof else None) or {}
-    my_loc = await _get_user_location(db, user_id)
+    my_loc = await _get_user_location(db, me)
 
     # Get all members in my neighborhood
     result = await db.execute(
@@ -268,7 +270,7 @@ async def get_my_neighborhood(
             neighborhood_members.c.user_id,
         ).where(
             neighborhood_members.c.neighborhood_id == membership.neighborhood_id,
-            neighborhood_members.c.user_id != user_id,
+            neighborhood_members.c.user_id != me,
         )
     )
     member_rows = result.fetchall()
@@ -308,20 +310,19 @@ async def get_my_neighborhood(
 
 @router.get("/nearby")
 async def get_nearby_neighborhoods(
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    2–3 neighboring clusters by centroid distance for exploration.
-    Returns name, vibe_description, member_count, sample members.
+    - 2–3 neighboring clusters by centroid distance for exploration.
+    - Returns name, vibe_description, member_count, sample members.
     """
-    user_id = await _resolve_user_id(db, payload)
-    await _ensure_clustering(db, user_id)
+    await _ensure_clustering(db, me)
 
     # Get user's neighborhood
     result = await db.execute(
         select(neighborhood_members.c.neighborhood_id)
-        .where(neighborhood_members.c.user_id == user_id)
+        .where(neighborhood_members.c.user_id == me)
     )
     my_membership = result.fetchone()
     if not my_membership:
@@ -342,11 +343,11 @@ async def get_nearby_neighborhoods(
     # Get current user's weights for user-to-user comparison
     result = await db.execute(
         select(preference_profiles.c.weights)
-        .where(preference_profiles.c.user_id == user_id)
+        .where(preference_profiles.c.user_id == me)
     )
     my_prof = result.fetchone()
     my_weights = (my_prof.weights if my_prof else None) or {}
-    my_loc = await _get_user_location(db, user_id)
+    my_loc = await _get_user_location(db, me)
 
     # Get all other neighborhoods
     result = await db.execute(
@@ -399,12 +400,12 @@ async def get_nearby_neighborhoods(
 @router.get("/user/{user_id}/summary")
 async def get_user_summary(
     user_id: int,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Full profile summary for a user: apartment items, vibe labels, scenario answers.
-    This is the 'deep view' before visiting their apartment.
+    - Full profile summary for a user: apartment items, vibe labels, scenario answers.
+    - This is the 'deep view' before visiting their apartment.
     """
     # Validate user exists
     result = await db.execute(
@@ -489,10 +490,13 @@ async def get_user_summary(
 
 @router.post("/recalculate")
 async def recalculate_neighborhoods(
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Force re-clustering of all users. Debug/admin endpoint (still requires auth)."""
+    """
+    - Force re-clustering of all users.
+    - Debug/admin endpoint (still requires auth).
+    """
     await _run_clustering(db)
     result = await db.execute(select(func.count()).select_from(neighborhoods))
     count = result.scalar() or 0

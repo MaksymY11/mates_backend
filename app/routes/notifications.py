@@ -7,27 +7,17 @@ from app.deps import require_verified_user
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
-# ── Helpers ──────────────────────────────────────────────────────
-
-async def _resolve_user_id(db: AsyncSession, payload: dict) -> int:
-    email = payload["email"]
-    result = await db.execute(select(users.c.id).where(users.c.email == email))
-    row = result.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="User not found")
-    return row.id
-
-# ── Notifications CRUD ─────────────────────────────────────────────
 
 @router.get("/")
 async def list_notifications(
     limit: int = 50,
     offset: int = 0,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List current user's notifications, newest first, with actor info."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - List current user's notifications, newest first, with actor info.
+    """
 
     # Total unread count (across all, not just this page)
     result = await db.execute(
@@ -76,11 +66,13 @@ async def list_notifications(
 @router.post("/{notification_id}/read")
 async def mark_read(
     notification_id: int,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Mark a single notification as read."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - Mark a single notification as read.
+    """
+
     result = await db.execute(
         update(notifications)
         .where(notifications.c.id == notification_id, notifications.c.user_id == me)
@@ -94,11 +86,13 @@ async def mark_read(
 
 @router.post("/read-all")
 async def mark_all_read(
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Mark all of current user's unread notifications as read."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - Mark all of current user's unread notifications as read.
+    """
+
     await db.execute(
         update(notifications)
         .where(notifications.c.user_id == me, notifications.c.read == False)
@@ -110,11 +104,13 @@ async def mark_all_read(
 
 @router.delete("/")
 async def clear_all_notifications(
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete all notifications for current user."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - Delete all notifications for current user.
+    """
+
     await db.execute(
         delete(notifications).where(notifications.c.user_id == me)
     )
@@ -125,11 +121,13 @@ async def clear_all_notifications(
 @router.delete("/{notification_id}")
 async def delete_notification(
     notification_id: int,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a notification."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - Delete a notification.
+    """
+
     result = await db.execute(
         delete(notifications)
         .where(notifications.c.id == notification_id, notifications.c.user_id == me)

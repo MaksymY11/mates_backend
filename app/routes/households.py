@@ -24,17 +24,10 @@ router = APIRouter(tags=["households"])
 
 # ── Helpers ──────────────────────────────────────────────────────
 
-async def _resolve_user_id(db: AsyncSession, payload: dict) -> int:
-    email = payload["email"]
-    result = await db.execute(select(users.c.id).where(users.c.email == email))
-    row = result.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="User not found")
-    return row.id
-
-
 async def _get_user_household(db: AsyncSession, user_id: int):
-    """Return the household membership row for a user, or None."""
+    """
+    - Return the household membership row for a user, or None.
+    """
     result = await db.execute(
         select(household_members).where(household_members.c.user_id == user_id)
     )
@@ -50,7 +43,9 @@ async def _member_count(db: AsyncSession, household_id: int) -> int:
 
 
 async def _has_completed_session(db: AsyncSession, user_a: int, user_b: int) -> bool:
-    """Check if two users have a completed Quick Picks session."""
+    """
+    - Check if two users have a completed Quick Picks session.
+    """
     a, b = min(user_a, user_b), max(user_a, user_b)
     result = await db.execute(
         select(quick_pick_sessions.c.id).where(
@@ -63,7 +58,9 @@ async def _has_completed_session(db: AsyncSession, user_a: int, user_b: int) -> 
 
 
 async def _user_info(db: AsyncSession, user_id: int) -> dict:
-    """Compact user info for household member listings."""
+    """
+    - Compact user info for household member listings.
+    """
     result = await db.execute(
         select(users.c.id, users.c.name, users.c.avatar_url, users.c.city, users.c.state)
         .where(users.c.id == user_id)
@@ -90,7 +87,10 @@ async def _user_info(db: AsyncSession, user_id: int) -> dict:
 
 
 async def _resolve_rule(db: AsyncSession, household_id: int, member_count: int, rule_id: int) -> str | None:
-    """After a vote, check if a rule should be auto-resolved. Returns new status or None."""
+    """
+    - After a vote, check if a rule should be auto-resolved.
+    - Returns new status or None.
+    """
     # Get current rule status to determine resolution semantics
     result = await db.execute(
         select(house_rules.c.status, house_rules.c.text).where(house_rules.c.id == rule_id)
@@ -156,11 +156,13 @@ async def _resolve_rule(db: AsyncSession, household_id: int, member_count: int, 
 @router.post("/households/")
 async def create_household(
     body: dict,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a household. Creator auto-becomes a member with role 'creator'."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - Create a household.
+    - Creator auto-becomes a member with role 'creator'.
+    """
 
     name = body.get("name", "").strip()
     if not name:
@@ -214,11 +216,12 @@ async def create_household(
 
 @router.get("/households/me")
 async def get_my_household(
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get current user's household with members and rules."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - Get current user's household with members and rules.
+    """
     membership = await _get_user_household(db, me)
 
     if not membership:
@@ -307,11 +310,14 @@ async def get_my_household(
 
 @router.post("/households/leave")
 async def leave_household(
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Leave current household. Transfers creator role if needed. Deletes if last member."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - Leave current household.
+    - Transfers creator role if needed.
+    - Deletes if last member.
+    """
     membership = await _get_user_household(db, me)
     if not membership:
         raise HTTPException(status_code=404, detail="Not in a household")
@@ -371,11 +377,13 @@ async def leave_household(
 @router.delete("/households/{household_id}")
 async def delete_household(
     household_id: int,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete household (creator only). Cascade deletes members, rules, votes, invites."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - Delete household (creator only).
+    - Cascade deletes members, rules, votes, invites.
+    """
     membership = await _get_user_household(db, me)
 
     if not membership or membership.household_id != household_id:
@@ -392,11 +400,13 @@ async def delete_household(
 @router.post("/households/invite/{user_id}")
 async def invite_user(
     user_id: int,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Invite a user to current household. Requires completed Quick Picks session."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - Invite a user to current household.
+    - Requires completed Quick Picks session.
+    """
     membership = await _get_user_household(db, me)
 
     if not membership:
@@ -466,11 +476,12 @@ async def invite_user(
 
 @router.get("/households/invites")
 async def list_invites(
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List pending invites — both sent and received."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - List pending invites — both sent and received.
+    """
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     cutoff = now - timedelta(days=7)
@@ -532,11 +543,12 @@ async def list_invites(
 @router.post("/households/invites/{invite_id}/accept")
 async def accept_invite(
     invite_id: int,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Accept an invite and join the household as 'member'."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - Accept an invite and join the household as 'member'.
+    """
 
     result = await db.execute(
         select(household_invites).where(household_invites.c.id == invite_id)
@@ -628,11 +640,12 @@ async def accept_invite(
 @router.post("/households/invites/{invite_id}/decline")
 async def decline_invite(
     invite_id: int,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Decline a household invite."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - Decline a household invite.
+    """
 
     result = await db.execute(
         select(household_invites).where(household_invites.c.id == invite_id)
@@ -655,11 +668,12 @@ async def decline_invite(
 @router.get("/households/{household_id}/rules")
 async def list_rules(
     household_id: int,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all rules with vote counts and current user's vote."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - List all rules with vote counts and current user's vote.
+    """
     membership = await _get_user_household(db, me)
     if not membership or membership.household_id != household_id:
         raise HTTPException(status_code=403, detail="Not a member of this household")
@@ -712,11 +726,12 @@ async def list_rules(
 async def propose_rule(
     household_id: int,
     body: dict,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Propose a new house rule."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - Propose a new house rule.
+    """
     membership = await _get_user_household(db, me)
     if not membership or membership.household_id != household_id:
         raise HTTPException(status_code=403, detail="Not a member of this household")
@@ -784,11 +799,13 @@ async def propose_rule(
 async def vote_on_rule(
     rule_id: int,
     body: dict,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Vote on a house rule. Auto-resolves when majority reached."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - Vote on a house rule.
+    - Auto-resolves when majority reached.
+    """
 
     vote_val = body.get("vote")
     if vote_val is None:
@@ -847,11 +864,13 @@ async def vote_on_rule(
 @router.post("/households/rules/{rule_id}/propose-removal")
 async def propose_rule_removal(
     rule_id: int,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Propose removal of an accepted rule. Resets votes, starts a removal vote."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - Propose removal of an accepted rule.
+    - Resets votes, starts a removal vote.
+    """
 
     result = await db.execute(
         select(house_rules).where(house_rules.c.id == rule_id)
@@ -918,11 +937,12 @@ async def propose_rule_removal(
 @router.delete("/households/rules/{rule_id}")
 async def delete_rule(
     rule_id: int,
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a rule (proposer or creator only)."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - Delete a rule (proposer or creator only).
+    """
 
     membership = await _get_user_household(db, me)
     if not membership:
@@ -952,11 +972,12 @@ async def delete_rule(
 
 @router.get("/households/eligible")
 async def list_eligible_connections(
-    payload: dict = Depends(require_verified_user),
+    me: int = Depends(require_verified_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List users with completed Quick Picks sessions who aren't in a household."""
-    me = await _resolve_user_id(db, payload)
+    """
+    - List users with completed Quick Picks sessions who aren't in a household.
+    """
 
     result = await db.execute(
         select(quick_pick_sessions).where(

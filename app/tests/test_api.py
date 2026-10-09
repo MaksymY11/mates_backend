@@ -280,7 +280,7 @@ async def test_scenarios(client):
             "scenario_id": scenario_A,
             "selected_option": "a"
         })
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
 
     print("4. POST Answer Scenario User B")
     response = await client.post("/scenarios/answer",
@@ -292,22 +292,12 @@ async def test_scenarios(client):
     assert response.status_code == 200
 
     print("3. GET history User A")
-    response = await client.get("/scenarios/history", headers=state["headers_A"])
-    assert response.status_code == 200
+    response = await client.get(f"/scenarios/history/{state['user_idA']}", headers=state["headers_A"])
+    assert response.status_code == 200, response.text
     print(json.dumps(response.json(), indent = 2))
 
     print("3. GET history User B")
-    response = await client.get("/scenarios/history", headers=state["headers_B"])
-    assert response.status_code == 200
-    print(json.dumps(response.json(), indent = 2))
-
-    print("4. GET Compare Scenarios A->B")
-    response = await client.get(f"/scenarios/compare/{state['user_idB']}", headers=state["headers_A"])
-    assert response.status_code == 200
-    print(json.dumps(response.json(), indent = 2))
-
-    print("4. GET Compare Scenarios B->A")
-    response = await client.get(f"/scenarios/compare/{state['user_idA']}", headers=state["headers_B"])
+    response = await client.get(f"/scenarios/history/{state['user_idA']}", headers=state["headers_B"])
     assert response.status_code == 200
     print(json.dumps(response.json(), indent = 2))
 
